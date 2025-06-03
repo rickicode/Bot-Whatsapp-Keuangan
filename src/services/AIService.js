@@ -286,6 +286,115 @@ Gunakan Rupiah Indonesia (IDR) untuk referensi mata uang bila berlaku.`;
         }
     }
 
+    async parseEditInstructions(editText, currentTransaction, userPhone) {
+        const systemPrompt = `Kamu adalah parser instruksi edit transaksi keuangan. Analisis instruksi edit dalam bahasa Indonesia dan tentukan perubahan yang perlu dibuat.
+
+Transaksi saat ini:
+- ID: ${currentTransaction.id}
+- Jenis: ${currentTransaction.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
+- Jumlah: ${currentTransaction.amount}
+- Deskripsi: ${currentTransaction.description}
+- Kategori: ${currentTransaction.category_name}
+- Tanggal: ${currentTransaction.date}
+
+Kembalikan HANYA objek JSON dengan format:
+{
+  "updates": {
+    "amount": number (jika diubah),
+    "description": string (jika diubah),
+    "categoryName": string (jika diubah - nama kategori yang sesuai),
+    "date": string (jika diubah - format YYYY-MM-DD)
+  },
+  "summary": string (ringkasan perubahan yang dibuat),
+  "confidence": number (0-1, seberapa yakin dalam parsing)
+}
+
+Contoh:
+"ubah jumlah jadi 100000" -> {"updates":{"amount":100000},"summary":"Jumlah diubah menjadi Rp 100.000","confidence":0.9}
+"ganti deskripsi jadi makan malam" -> {"updates":{"description":"makan malam"},"summary":"Deskripsi diubah menjadi 'makan malam'","confidence":0.9}
+"ubah kategori ke makanan" -> {"updates":{"categoryName":"Makanan"},"summary":"Kategori diubah ke Makanan","confidence":0.8}
+
+Jika tidak yakin dengan instruksi, berikan confidence rendah.
+
+Instruksi edit: "${editText}"`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: editText }
+            ], 0.3, 500);
+
+            const cleanResponse = response.replace(/```json\s*|\s*```/g, '').trim();
+            const parsed = JSON.parse(cleanResponse);
+            
+            // Validate the response structure
+            if (!parsed.updates || !parsed.summary || parsed.confidence === undefined) {
+                throw new Error('Invalid response structure');
+            }
+
+            return parsed;
+        } catch (error) {
+            this.logger.error('Error parsing edit instructions:', error);
+            return {
+                updates: {},
+                summary: "Tidak dapat memahami instruksi edit",
+                confidence: 0
+            };
+        }
+    }
+
+    async parseNaturalEdit(editText, userPhone) {
+        const systemPrompt = `Kamu adalah parser instruksi edit transaksi dalam bahasa natural. Analisis teks dan tentukan apakah ini adalah instruksi edit transaksi.
+
+Kembalikan HANYA objek JSON dengan format:
+{
+  "needsTransactionId": boolean (true jika perlu ID transaksi),
+  "transactionId": number (jika ID disebutkan secara eksplisit),
+  "updates": {
+    "amount": number (jika diubah),
+    "description": string (jika diubah),
+    "categoryName": string (jika diubah),
+    "date": string (jika diubah - format YYYY-MM-DD)
+  },
+  "summary": string (ringkasan perubahan yang diminta),
+  "confidence": number (0-1, seberapa yakin ini adalah instruksi edit)
+}
+
+Contoh:
+"edit transaksi id 123 ubah jumlah jadi 50000" -> {"needsTransactionId":false,"transactionId":123,"updates":{"amount":50000},"summary":"Ubah jumlah transaksi ID 123 menjadi Rp 50.000","confidence":0.9}
+"ubah transaksi terakhir jadi 100000" -> {"needsTransactionId":true,"updates":{"amount":100000},"summary":"Ubah jumlah transaksi menjadi Rp 100.000","confidence":0.8}
+"ganti deskripsi transaksi jadi makan malam" -> {"needsTransactionId":true,"updates":{"description":"makan malam"},"summary":"Ubah deskripsi menjadi 'makan malam'","confidence":0.8}
+
+Jika bukan instruksi edit atau confidence rendah, return confidence < 0.6.
+
+Teks: "${editText}"`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: editText }
+            ], 0.3, 400);
+
+            const cleanResponse = response.replace(/```json\s*|\s*```/g, '').trim();
+            const parsed = JSON.parse(cleanResponse);
+            
+            // Validate the response structure
+            if (parsed.confidence === undefined || !parsed.updates) {
+                throw new Error('Invalid response structure');
+            }
+
+            return parsed;
+        } catch (error) {
+            this.logger.error('Error parsing natural edit:', error);
+            return {
+                needsTransactionId: false,
+                updates: {},
+                summary: "Tidak dapat memahami instruksi",
+                confidence: 0
+            };
+        }
+    }
+
     async logInteraction(userPhone, prompt, response, type = 'general') {
         try {
             if (global.bot && global.bot.db) {
