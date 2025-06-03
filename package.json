@@ -5,11 +5,16 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:production": "scripts/start.sh",
     "dev": "nodemon src/index.js",
     "setup": "node scripts/setup.js",
     "setup-db": "node scripts/setup-database.js",
     "backup": "node scripts/backup.js",
-    "test": "jest"
+    "test": "jest",
+    "docker:build": "docker build -t whatsapp-financial-bot .",
+    "docker:run": "docker run -d --name whatsapp-bot whatsapp-financial-bot",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up -d",
+    "docker:prod": "docker-compose up -d"
   },
   "keywords": [
     "whatsapp",
