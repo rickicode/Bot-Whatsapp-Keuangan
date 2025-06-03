@@ -46,13 +46,13 @@ cd whatsapp-financial-bot
 cp .env.example .env
 # Edit .env sesuai kebutuhan
 
-# Start dengan PostgreSQL
+# Start dengan PostgreSQL (akan otomatis run setup)
 docker-compose up -d
 ```
 
 ### 2. Development dengan Docker
 ```bash
-# Start development environment
+# Start development environment (akan otomatis run setup)
 docker-compose -f docker-compose.dev.yml up -d
 
 # Access pgAdmin: http://localhost:8080
@@ -64,7 +64,7 @@ docker-compose -f docker-compose.dev.yml up -d
 # Build image
 docker build -t whatsapp-financial-bot .
 
-# Run container
+# Run container (setup sudah included dalam build)
 docker run -d \
   --name whatsapp-bot \
   -e DATABASE_TYPE=sqlite3 \
@@ -174,7 +174,8 @@ npm install
 cp .env.example .env
 # Edit .env
 
-# Setup database
+# Setup aplikasi dan database
+npm run setup
 npm run setup-db
 
 # Install PM2 untuk process management

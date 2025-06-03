@@ -73,7 +73,7 @@
     }
   },
   "scripts": {
-    "postdeploy": "npm run setup-db"
+    "postdeploy": "npm run setup && npm run setup-db"
   },
   "environments": {
     "review": {

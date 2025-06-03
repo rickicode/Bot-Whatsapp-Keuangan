@@ -76,11 +76,6 @@ pids/
 # Yarn Integrity file
 .yarn-integrity
 
-# Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
-
 # Build outputs
 dist/
 build/

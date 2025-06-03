@@ -17,6 +17,7 @@ cmds = [
 
 [phases.build]
 cmds = [
+  "npm run setup",
   "npm run setup-db"
 ]
 
