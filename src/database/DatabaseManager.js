@@ -76,26 +76,42 @@ class DatabaseManager {
         try {
             const dbType = this.getDatabaseType();
             
-            if (dbType === 'postgres' || dbType === 'postgresql') {
+            if (dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase') {
+                // First, insert the user
                 await this.run(
-                    'INSERT INTO users (phone, name) VALUES ($1, $2) ON CONFLICT (phone) DO NOTHING',
-                    [phone, name]
+                    'INSERT INTO users (phone, name, timezone) VALUES ($1, $2, $3) ON CONFLICT (phone) DO NOTHING',
+                    [phone, name, 'Asia/Jakarta']
                 );
                 
-                // Copy default categories for new user using PostgreSQL syntax
-                await this.run(`
-                    INSERT INTO categories (user_phone, name, type, color)
-                    SELECT $1, name, type, color FROM categories
-                    WHERE user_phone = 'default'
-                    ON CONFLICT (user_phone, name, type) DO NOTHING
-                `, [phone]);
+                // Then copy default categories in a single query for better performance
+                const defaultCategories = await this.all(
+                    'SELECT name, type, color FROM categories WHERE user_phone = $1',
+                    ['default']
+                );
+
+                if (defaultCategories.length > 0) {
+                    const values = defaultCategories.map((_, idx) =>
+                        `($1, $${idx * 3 + 2}, $${idx * 3 + 3}, $${idx * 3 + 4})`
+                    ).join(',');
+
+                    const params = [phone];
+                    defaultCategories.forEach(cat => {
+                        params.push(cat.name, cat.type, cat.color);
+                    });
+
+                    await this.run(`
+                        INSERT INTO categories (user_phone, name, type, color)
+                        VALUES ${values}
+                        ON CONFLICT (user_phone, name, type) DO NOTHING
+                    `, params);
+                }
             } else {
+                // SQLite syntax
                 await this.run(
-                    'INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)',
-                    [phone, name]
+                    'INSERT OR IGNORE INTO users (phone, name, timezone) VALUES (?, ?, ?)',
+                    [phone, name, 'Asia/Jakarta']
                 );
                 
-                // Copy default categories for new user using SQLite syntax
                 await this.run(`
                     INSERT OR IGNORE INTO categories (user_phone, name, type, color)
                     SELECT ?, name, type, color FROM categories WHERE user_phone = 'default'

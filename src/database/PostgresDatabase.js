@@ -58,8 +58,30 @@ class PostgresDatabase extends BaseDatabase {
 
     async run(sql, params = []) {
         try {
+            // Convert SQLite style queries to PostgreSQL
+            let pgSql = sql;
+            
+            // Convert INSERT OR IGNORE
+            if (sql.toLowerCase().includes('insert or ignore')) {
+                pgSql = sql.replace(/INSERT OR IGNORE/i, 'INSERT');
+                if (sql.toLowerCase().includes('into users')) {
+                    pgSql += ' ON CONFLICT (phone) DO NOTHING';
+                } else if (sql.toLowerCase().includes('into categories')) {
+                    pgSql += ' ON CONFLICT (user_phone, name, type) DO NOTHING';
+                }
+            }
+            
+            // Convert OR REPLACE
+            if (sql.toLowerCase().includes('insert or replace')) {
+                if (sql.toLowerCase().includes('into settings')) {
+                    pgSql = sql.replace(/INSERT OR REPLACE/i, 'INSERT');
+                    pgSql += ' ON CONFLICT (user_phone, setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = CURRENT_TIMESTAMP';
+                }
+            }
+            
             // Convert SQLite style ? placeholders to PostgreSQL $1, $2, etc.
-            const pgSql = this.convertPlaceholders(sql);
+            pgSql = this.convertPlaceholders(pgSql);
+            
             const result = await this.client.query(pgSql, params);
             
             // Return SQLite-compatible result
@@ -139,6 +161,9 @@ class PostgresDatabase extends BaseDatabase {
 
     async createTables() {
         const tables = [
+            // Enable UUID extension if not exists (for Supabase)
+            `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`,
+
             // Users table
             `CREATE TABLE IF NOT EXISTS users (
                 phone VARCHAR(20) PRIMARY KEY,
@@ -294,6 +319,26 @@ class PostgresDatabase extends BaseDatabase {
             { name: 'Pengeluaran Bisnis', type: 'expense', color: '#0d6efd' },
             { name: 'Pengeluaran Lain', type: 'expense', color: '#6c757d' }
         ];
+
+        // Use a single query to insert all categories at once for better performance
+        const values = defaultCategories.map((cat, idx) =>
+            `('default', $${idx * 3 + 1}, $${idx * 3 + 2}, $${idx * 3 + 3})`
+        ).join(',');
+
+        const params = defaultCategories.reduce((acc, cat) => {
+            acc.push(cat.name, cat.type, cat.color);
+            return acc;
+        }, []);
+
+        try {
+            await this.client.query(`
+                INSERT INTO categories (user_phone, name, type, color)
+                VALUES ${values}
+                ON CONFLICT (user_phone, name, type) DO NOTHING
+            `, params);
+        } catch (error) {
+            this.logger.error('Error inserting default categories:', error);
+        }
 
         for (const category of defaultCategories) {
             try {
