@@ -1,22 +1,11 @@
-# Multi-stage build untuk optimasi ukuran image
-FROM node:18-alpine AS builder
+# Universal Dockerfile untuk Serverless dan VPS
+FROM node:20-alpine
 
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-
-# Production stage
-FROM node:18-alpine AS production
-
-# Install required system dependencies
+# Install system dependencies
 RUN apk add --no-cache \
     sqlite \
     postgresql-client \
+    bash \
     chromium \
     nss \
     freetype \
@@ -24,10 +13,9 @@ RUN apk add --no-cache \
     harfbuzz \
     ca-certificates \
     ttf-freefont \
-    bash \
     && rm -rf /var/cache/apk/*
 
-# Tell Puppeteer to use installed Chromium
+# Configure Puppeteer
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
@@ -41,26 +29,26 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Copy node_modules from builder stage
-COPY --from=builder /app/node_modules ./node_modules
+# Install dependencies
+RUN npm ci --only=production && npm cache clean --force
 
 # Copy application code
 COPY --chown=whatsappbot:nodejs . .
 
-# Create necessary directories and fix permissions
+# Create directories and set permissions
 RUN mkdir -p data logs backups && \
-    chown -R whatsappbot:nodejs data logs backups && \
-    chmod +x scripts/start.sh
+    chown -R whatsappbot:nodejs . && \
+    chmod +x scripts/*.sh
 
 # Switch to non-root user
 USER whatsappbot
 
-# Expose port (if web interface is added later)
+# Expose port
 EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD node -e "console.log('Health check OK'); process.exit(0);" || exit 1
+    CMD node -e "console.log('Health OK'); process.exit(0);" || exit 1
 
 # Default command
-CMD ["bash", "scripts/start.sh"]
+CMD ["node", "src/index.js"]

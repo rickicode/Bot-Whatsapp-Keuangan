@@ -1,11 +1,10 @@
+# Docker Compose untuk Development (SQLite)
 version: '3.8'
 
 services:
-  # WhatsApp Bot Development Service
+  # WhatsApp Bot Development
   whatsapp-bot-dev:
-    build:
-      context: .
-      target: builder
+    build: .
     container_name: whatsapp-financial-bot-dev
     restart: unless-stopped
     environment:
@@ -14,6 +13,10 @@ services:
       - DB_PATH=/app/data/financial_dev.db
       - ENABLE_AI_FEATURES=true
       - LOG_LEVEL=debug
+      # Development environment variables
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-your_dev_api_key}
+      - BOT_ADMIN_PHONE=${BOT_ADMIN_PHONE:-+62xxxxxxxxxx}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
     volumes:
       - .:/app
       - /app/node_modules
@@ -22,43 +25,9 @@ services:
       - ./backups:/app/backups
     ports:
       - "3000:3000"
-    command: sh -c "scripts/start.sh || (npm run setup && npm run dev)"
+    command: npm run dev
     networks:
       - bot-dev-network
-
-  # PostgreSQL Database for Development
-  postgres-dev:
-    image: postgres:15-alpine
-    container_name: postgres-financial-bot-dev
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=financial_bot_dev
-      - POSTGRES_USER=devuser
-      - POSTGRES_PASSWORD=devpassword
-    volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    networks:
-      - bot-dev-network
-
-  # pgAdmin for Database Management
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: pgadmin-financial-bot
-    restart: unless-stopped
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@financialbot.com
-      - PGADMIN_DEFAULT_PASSWORD=admin123
-    ports:
-      - "8080:80"
-    depends_on:
-      - postgres-dev
-    networks:
-      - bot-dev-network
-
-volumes:
-  postgres_dev_data:
 
 networks:
   bot-dev-network:

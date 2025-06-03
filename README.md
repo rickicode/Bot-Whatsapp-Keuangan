@@ -31,12 +31,12 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ 
-- npm or yarn
-- DeepSeek API key (for AI features)
+- Node.js 16+ (untuk local development)
+- Docker & Docker Compose (untuk deployment)
+- DeepSeek API key (untuk AI features)
 - WhatsApp account
 
-### Installation
+### Local Development
 
 1. **Clone the repository**
 ```bash
@@ -49,26 +49,55 @@ cd whatsapp-financial-bot
 npm install
 ```
 
-3. **Setup the application**
-```bash
-npm run setup
-```
-
-4. **Configure environment**
+3. **Configure environment**
 ```bash
 cp .env.example .env
 # Edit .env with your settings
 ```
 
-5. **Start the bot**
+4. **Setup and start**
 ```bash
+npm run setup
 npm start
 ```
 
-6. **Scan QR Code**
-   - QR code will appear in terminal
-   - Scan with WhatsApp to connect
-   - Send `/help` to see available commands
+### Docker Deployment
+
+#### Serverless (Easypanel/Coolify/Railway)
+```bash
+# Build dan deploy untuk serverless
+npm run docker:serverless
+
+# Atau upload ke platform dengan environment variables:
+# DEEPSEEK_API_KEY, BOT_ADMIN_PHONE, dll
+```
+
+#### VPS dengan PostgreSQL
+```bash
+# Deploy dengan PostgreSQL
+npm run docker:vps
+
+# Lihat logs
+npm run docker:logs
+```
+
+#### Development dengan Docker
+```bash
+npm run docker:dev
+```
+
+### Environment Variables
+Buat file `.env` atau set di platform deployment:
+```env
+DEEPSEEK_API_KEY=your_api_key_here
+BOT_ADMIN_PHONE=+62xxxxxxxxxx
+ALLOWED_USERS=+62xxxxxxxxxx,+62yyyyyyyyyy
+```
+
+### Scan QR Code
+- QR code akan muncul di terminal/logs
+- Scan dengan WhatsApp untuk connect
+- Kirim `/help` untuk melihat commands
 
 ## ⚙️ Configuration
 

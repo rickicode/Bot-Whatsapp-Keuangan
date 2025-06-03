@@ -1,3 +1,4 @@
+# Docker Compose untuk VPS (dengan PostgreSQL)
 version: '3.8'
 
 services:
@@ -16,6 +17,10 @@ services:
       - DB_PASSWORD=botpassword
       - ENABLE_AI_FEATURES=true
       - LOG_LEVEL=info
+      # Tambahkan environment variables Anda di sini
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-your_api_key_here}
+      - BOT_ADMIN_PHONE=${BOT_ADMIN_PHONE:-+62xxxxxxxxxx}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -23,9 +28,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "3000:3000"
     networks:
       - bot-network
-    command: ["scripts/start.sh"]
 
   # PostgreSQL Database
   postgres:
@@ -41,30 +47,17 @@ services:
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     ports:
       - "5432:5432"
-    networks:
-      - bot-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U botuser -d financial_bot"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  # Redis (optional, for future caching)
-  redis:
-    image: redis:7-alpine
-    container_name: redis-financial-bot
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
     networks:
       - bot-network
 
 volumes:
   postgres_data:
-  redis_data:
 
 networks:
   bot-network:
