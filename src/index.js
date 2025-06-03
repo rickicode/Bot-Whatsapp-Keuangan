@@ -13,6 +13,7 @@ const cors = require('cors');
 const cron = require('node-cron');
 const ReminderService = require('./services/ReminderService');
 const fs = require('fs');
+const path = require('path');
 
 class WhatsAppFinancialBot {
     constructor() {
@@ -106,13 +107,14 @@ class WhatsAppFinancialBot {
             this.reminderService = new ReminderService(this.db);
             this.logger.info('✅ Reminder Service initialized');
 
-            // Initialize WhatsApp client
+            // Initialize WhatsApp client with robust Docker configuration
             this.client = new Client({
                 authStrategy: new LocalAuth({
-                    clientId: 'financial-bot'
+                    clientId: 'financial-bot',
+                    dataPath: './data/whatsapp-session'
                 }),
                 puppeteer: {
-                    headless: true,
+                    headless: 'new',
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
@@ -120,9 +122,35 @@ class WhatsAppFinancialBot {
                         '--disable-accelerated-2d-canvas',
                         '--no-first-run',
                         '--no-zygote',
-                        '--single-process',
-                        '--disable-gpu'
-                    ]
+                        '--disable-gpu',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor',
+                        '--disable-background-timer-throttling',
+                        '--disable-backgrounding-occluded-windows',
+                        '--disable-renderer-backgrounding',
+                        '--disable-ipc-flooding-protection',
+                        '--enable-features=NetworkService',
+                        '--force-color-profile=srgb',
+                        '--use-mock-keychain',
+                        '--disable-component-extensions-with-background-pages',
+                        '--disable-default-apps',
+                        '--mute-audio',
+                        '--no-default-browser-check',
+                        '--disable-background-mode',
+                        '--disable-extensions',
+                        '--disable-plugins',
+                        '--disable-translate',
+                        '--disable-sync',
+                        '--metrics-recording-only',
+                        '--safebrowsing-disable-auto-update',
+                        '--disable-component-update'
+                    ],
+                    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+                    timeout: 120000,
+                    ignoreDefaultArgs: ['--disable-extensions'],
+                    handleSIGINT: false,
+                    handleSIGTERM: false,
+                    handleSIGHUP: false
                 }
             });
 
@@ -132,8 +160,8 @@ class WhatsAppFinancialBot {
             this.setupEventHandlers();
             this.setupCronJobs();
             
-            // Start WhatsApp client
-            await this.client.initialize();
+            // Start WhatsApp client with retry mechanism
+            await this.initializeWhatsAppWithRetry();
             
             // Start Express server
             const port = process.env.PORT || 3000;
@@ -143,7 +171,115 @@ class WhatsAppFinancialBot {
 
         } catch (error) {
             this.logger.error('❌ Failed to initialize bot:', error);
-            process.exit(1);
+            // In production/Docker, retry instead of immediate exit
+            if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'development') {
+                this.logger.info('🔄 Retrying initialization in 10 seconds...');
+                setTimeout(() => this.initialize(), 10000);
+            } else {
+                process.exit(1);
+            }
+        }
+    }
+
+    async initializeWhatsAppWithRetry(maxRetries = 5) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                this.logger.info(`📱 Attempting to initialize WhatsApp client (attempt ${attempt}/${maxRetries})`);
+                
+                // Clear any existing session data that might be corrupted
+                if (attempt > 1) {
+                    const sessionPath = './data/whatsapp-session';
+                    if (fs.existsSync(sessionPath)) {
+                        this.logger.info('🧹 Clearing corrupted session data...');
+                        try {
+                            if (fs.rmSync) {
+                                fs.rmSync(sessionPath, { recursive: true, force: true });
+                            } else {
+                                // Fallback for older Node.js versions
+                                const { execSync } = require('child_process');
+                                execSync(`rm -rf "${sessionPath}"`);
+                            }
+                        } catch (cleanupError) {
+                            this.logger.warn('Warning during session cleanup:', cleanupError.message);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                    
+                    // Recreate client with fresh configuration
+                    this.client = new Client({
+                        authStrategy: new LocalAuth({
+                            clientId: 'financial-bot',
+                            dataPath: './data/whatsapp-session'
+                        }),
+                        puppeteer: {
+                            headless: 'new',
+                            args: [
+                                '--no-sandbox',
+                                '--disable-setuid-sandbox',
+                                '--disable-dev-shm-usage',
+                                '--disable-accelerated-2d-canvas',
+                                '--no-first-run',
+                                '--no-zygote',
+                                '--disable-gpu',
+                                '--disable-web-security',
+                                '--disable-features=VizDisplayCompositor',
+                                '--disable-background-timer-throttling',
+                                '--disable-backgrounding-occluded-windows',
+                                '--disable-renderer-backgrounding',
+                                '--disable-ipc-flooding-protection',
+                                '--enable-features=NetworkService',
+                                '--force-color-profile=srgb',
+                                '--use-mock-keychain',
+                                '--disable-component-extensions-with-background-pages',
+                                '--disable-default-apps',
+                                '--mute-audio',
+                                '--no-default-browser-check',
+                                '--disable-background-mode',
+                                '--disable-extensions',
+                                '--disable-plugins',
+                                '--disable-translate',
+                                '--disable-sync',
+                                '--metrics-recording-only',
+                                '--safebrowsing-disable-auto-update',
+                                '--disable-component-update'
+                            ],
+                            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+                            timeout: 120000,
+                            ignoreDefaultArgs: ['--disable-extensions'],
+                            handleSIGINT: false,
+                            handleSIGTERM: false,
+                            handleSIGHUP: false
+                        }
+                    });
+                    
+                    this.setupEventHandlers();
+                }
+                
+                await this.client.initialize();
+                this.logger.info('✅ WhatsApp client initialized successfully');
+                return;
+                
+            } catch (error) {
+                this.logger.error(`❌ WhatsApp initialization attempt ${attempt} failed:`, error.message);
+                
+                if (attempt < maxRetries) {
+                    const delay = Math.min(5000 * attempt, 30000); // Exponential backoff, max 30 seconds
+                    this.logger.info(`⏳ Waiting ${delay/1000} seconds before retry...`);
+                    
+                    // Cleanup current client
+                    if (this.client) {
+                        try {
+                            await this.client.destroy();
+                        } catch (destroyError) {
+                            this.logger.warn('Warning during client cleanup:', destroyError.message);
+                        }
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    throw new Error(`Failed to initialize WhatsApp after ${maxRetries} attempts: ${error.message}`);
+                }
+            }
         }
     }
 
