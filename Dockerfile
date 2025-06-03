@@ -50,18 +50,18 @@ COPY --chown=whatsappbot:nodejs . .
 RUN mkdir -p data logs backups && \
     chown -R whatsappbot:nodejs data logs backups
 
+# Make startup script executable
+RUN chmod +x scripts/start.sh
+
 # Switch to non-root user
 USER whatsappbot
-
-# Run setup to initialize database and configuration
-RUN npm run setup
 
 # Expose port (if web interface is added later)
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "console.log('Health check passed')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD node -e "const db = require('./src/database/DatabaseFactory').create(); db.initialize().then(() => { console.log('Health check passed'); process.exit(0); }).catch(() => process.exit(1));" || exit 1
 
-# Default command
-CMD ["npm", "start"]
+# Default command using startup script
+CMD ["scripts/start.sh"]

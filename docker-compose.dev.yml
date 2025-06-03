@@ -22,7 +22,7 @@ services:
       - ./backups:/app/backups
     ports:
       - "3000:3000"
-    command: sh -c "npm run setup && npm run dev"
+    command: sh -c "scripts/start.sh || (npm run setup && npm run dev)"
     networks:
       - bot-dev-network
 
