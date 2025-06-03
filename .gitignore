@@ -79,7 +79,7 @@ pids/
 # Build outputs
 dist/
 build/
-
+.storage/
 # Test files
 test-results/
 __tests__/

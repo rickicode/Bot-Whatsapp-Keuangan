@@ -22,18 +22,24 @@ async function setup() {
             console.log(`  ✅ Created: ${dir}`);
         }
 
-        // Copy .env file if it doesn't exist
+        // Copy .env file if it doesn't exist (skip in Docker production)
         console.log('\n⚙️ Setting up environment...');
-        if (!await fs.pathExists('.env')) {
-            if (await fs.pathExists('.env.example')) {
-                await fs.copy('.env.example', '.env');
-                console.log('  ✅ Created .env from .env.example');
-                console.log('  ⚠️  Please edit .env file with your settings');
+        const isDockerProduction = process.env.NODE_ENV === 'production';
+        
+        if (!isDockerProduction) {
+            if (!await fs.pathExists('.env')) {
+                if (await fs.pathExists('.env.example')) {
+                    await fs.copy('.env.example', '.env');
+                    console.log('  ✅ Created .env from .env.example');
+                    console.log('  ⚠️  Please edit .env file with your settings');
+                } else {
+                    console.log('  ❌ .env.example not found');
+                }
             } else {
-                console.log('  ❌ .env.example not found');
+                console.log('  ✅ .env file already exists');
             }
         } else {
-            console.log('  ✅ .env file already exists');
+            console.log('  ✅ Environment variables provided by Docker');
         }
 
         // Initialize database

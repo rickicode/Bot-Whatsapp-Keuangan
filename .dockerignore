@@ -78,18 +78,14 @@ Thumbs.db
 .gitignore
 
 # Docker
-Dockerfile*
 docker-compose*
 .dockerignore
-
-# Documentation
-*.md
-docs/
 
 # Test files
 test/
 tests/
 __tests__/
+test-*.js
 *.test.js
 *.spec.js
 

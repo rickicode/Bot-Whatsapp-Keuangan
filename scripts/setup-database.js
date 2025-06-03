@@ -19,74 +19,120 @@ async function setupDatabase() {
     console.log('🗄️  Database Setup for WhatsApp Financial Bot\n');
     
     try {
-        // Ask user to choose database type
-        console.log('Available database options:');
-        console.log('1. SQLite3 (recommended for small to medium usage)');
-        console.log('2. PostgreSQL (recommended for production/high usage)\n');
-        
-        const choice = await askQuestion('Choose database type (1 or 2): ');
+        // Check if running in Docker or with environment variables
+        const isDocker = process.env.NODE_ENV === 'production' && process.env.DATABASE_TYPE;
+        const databaseType = process.env.DATABASE_TYPE;
         
         let dbConfig = {};
         
-        if (choice === '1') {
-            console.log('\n📦 Setting up SQLite3...');
-            dbConfig = {
-                DATABASE_TYPE: 'sqlite3',
-                DB_PATH: './data/financial.db'
-            };
-            console.log('✅ SQLite3 configuration ready');
+        if (isDocker) {
+            console.log('🐳 Running in Docker mode with environment variables');
             
-        } else if (choice === '2') {
-            console.log('\n🐘 Setting up PostgreSQL...');
-            console.log('Please provide PostgreSQL connection details:\n');
-            
-            const host = await askQuestion('Database host (default: localhost): ') || 'localhost';
-            const port = await askQuestion('Database port (default: 5432): ') || '5432';
-            const database = await askQuestion('Database name (default: financial_bot): ') || 'financial_bot';
-            const user = await askQuestion('Database username: ');
-            const password = await askQuestion('Database password: ');
-            const ssl = await askQuestion('Use SSL? (y/N): ');
-            
-            if (!user || !password) {
-                throw new Error('Username and password are required for PostgreSQL');
+            if (databaseType === 'postgresql') {
+                console.log('\n🐘 Using PostgreSQL from environment...');
+                dbConfig = {
+                    DATABASE_TYPE: 'postgresql',
+                    DB_HOST: process.env.DB_HOST || 'postgres',
+                    DB_PORT: process.env.DB_PORT || '5432',
+                    DB_NAME: process.env.DB_NAME || 'financial_bot',
+                    DB_USER: process.env.DB_USER || 'botuser',
+                    DB_PASSWORD: process.env.DB_PASSWORD || 'botpassword',
+                    DB_SSL: process.env.DB_SSL || 'false'
+                };
+                console.log('✅ PostgreSQL configuration from environment');
+                
+            } else {
+                console.log('\n📦 Using SQLite3 as fallback...');
+                dbConfig = {
+                    DATABASE_TYPE: 'sqlite3',
+                    DB_PATH: './data/financial.db'
+                };
+                console.log('✅ SQLite3 configuration ready');
             }
             
-            dbConfig = {
-                DATABASE_TYPE: 'postgres',
-                DATABASE_HOST: host,
-                DATABASE_PORT: port,
-                DATABASE_NAME: database,
-                DATABASE_USER: user,
-                DATABASE_PASSWORD: password,
-                DATABASE_SSL: ssl.toLowerCase() === 'y' ? 'true' : 'false'
-            };
-            console.log('✅ PostgreSQL configuration ready');
+            console.log('🎉 Database configuration completed!');
+            return dbConfig;
             
         } else {
-            throw new Error('Invalid choice. Please select 1 or 2.');
+            // Interactive mode for local development
+            console.log('Available database options:');
+            console.log('1. SQLite3 (recommended for small to medium usage)');
+            console.log('2. PostgreSQL (recommended for production/high usage)\n');
+            
+            const choice = await askQuestion('Choose database type (1 or 2): ');
+            
+            if (choice === '1') {
+                console.log('\n📦 Setting up SQLite3...');
+                dbConfig = {
+                    DATABASE_TYPE: 'sqlite3',
+                    DB_PATH: './data/financial.db'
+                };
+                console.log('✅ SQLite3 configuration ready');
+                
+            } else if (choice === '2') {
+                console.log('\n🐘 Setting up PostgreSQL...');
+                console.log('Please provide PostgreSQL connection details:\n');
+                
+                const host = await askQuestion('Database host (default: localhost): ') || 'localhost';
+                const port = await askQuestion('Database port (default: 5432): ') || '5432';
+                const database = await askQuestion('Database name (default: financial_bot): ') || 'financial_bot';
+                const user = await askQuestion('Database username: ');
+                const password = await askQuestion('Database password: ');
+                const ssl = await askQuestion('Use SSL? (y/N): ');
+                
+                if (!user || !password) {
+                    throw new Error('Username and password are required for PostgreSQL');
+                }
+                
+                dbConfig = {
+                    DATABASE_TYPE: 'postgresql',
+                    DB_HOST: host,
+                    DB_PORT: port,
+                    DB_NAME: database,
+                    DB_USER: user,
+                    DB_PASSWORD: password,
+                    DB_SSL: ssl.toLowerCase() === 'y' ? 'true' : 'false'
+                };
+                console.log('✅ PostgreSQL configuration ready');
+                
+            } else {
+                throw new Error('Invalid choice. Please select 1 or 2.');
+            }
+            
+            // Update .env file only in interactive mode
+            await updateEnvFile(dbConfig);
+            
+            console.log('\n🎉 Database configuration completed!');
+            console.log('\nNext steps:');
+            
+            if (choice === '1') {
+                console.log('• SQLite database will be created automatically');
+                console.log('• Run: npm run setup');
+            } else {
+                console.log('• Make sure PostgreSQL server is running');
+                console.log('• Create the database if it doesn\'t exist:');
+                console.log(`  CREATE DATABASE ${dbConfig.DB_NAME};`);
+                console.log('• Run: npm run setup');
+            }
         }
         
-        // Update .env file
-        await updateEnvFile(dbConfig);
-        
-        console.log('\n🎉 Database configuration completed!');
-        console.log('\nNext steps:');
-        
-        if (choice === '1') {
-            console.log('• SQLite database will be created automatically');
-            console.log('• Run: npm run setup');
-        } else {
-            console.log('• Make sure PostgreSQL server is running');
-            console.log('• Create the database if it doesn\'t exist:');
-            console.log(`  CREATE DATABASE ${dbConfig.DATABASE_NAME};`);
-            console.log('• Run: npm run setup');
-        }
+        return dbConfig;
         
     } catch (error) {
         console.error('❌ Setup failed:', error.message);
-        process.exit(1);
+        if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
+            process.exit(1);
+        }
+        // In production, don't exit completely, return default config
+        console.log('⚠️  Using default SQLite configuration');
+        return {
+            DATABASE_TYPE: 'sqlite3',
+            DB_PATH: './data/financial.db'
+        };
     } finally {
-        rl.close();
+        if (rl) {
+            rl.close();
+        }
     }
 }
 

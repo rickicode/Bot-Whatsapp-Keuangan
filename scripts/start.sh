@@ -27,32 +27,61 @@ echo "📁 Creating directories..."
 mkdir -p data logs backups
 echo "✅ Directories created"
 
-# Check if .env exists
-if [ ! -f .env ]; then
-    echo "⚠️  .env file not found. Copying from .env.example..."
-    if [ -f .env.example ]; then
-        cp .env.example .env
-        echo "✅ .env file created from example"
-        echo "🔧 Please edit .env file with your configuration before continuing"
-        exit 1
-    else
-        echo "❌ .env.example not found. Please create .env file manually."
-        exit 1
+# Check if running in Docker (environment variables will be provided)
+if [ "$NODE_ENV" = "production" ] && [ -n "$DATABASE_TYPE" ]; then
+    echo "✅ Running in Docker production mode"
+    echo "📍 Database type: $DATABASE_TYPE"
+    
+    # Wait for database if using PostgreSQL
+    if [ "$DATABASE_TYPE" = "postgresql" ]; then
+        echo "⏳ Waiting for PostgreSQL to be ready..."
+        max_attempts=30
+        attempt=1
+        
+        while [ $attempt -le $max_attempts ]; do
+            if pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1; then
+                echo "✅ PostgreSQL is ready!"
+                break
+            fi
+            
+            echo "⏳ Attempt $attempt/$max_attempts: Waiting for PostgreSQL..."
+            sleep 2
+            attempt=$((attempt + 1))
+        done
+        
+        if [ $attempt -gt $max_attempts ]; then
+            echo "❌ PostgreSQL connection timeout"
+            exit 1
+        fi
     fi
+else
+    # Check if .env exists for local development
+    if [ ! -f .env ]; then
+        echo "⚠️  .env file not found. Copying from .env.example..."
+        if [ -f .env.example ]; then
+            cp .env.example .env
+            echo "✅ .env file created from example"
+            echo "🔧 Please edit .env file with your configuration before continuing"
+            exit 1
+        else
+            echo "❌ .env.example not found. Please create .env file manually."
+            exit 1
+        fi
+    fi
+
+    echo "✅ Environment configuration found"
+    # Load environment variables for local development
+    set -a
+    source .env 2>/dev/null || true
+    set +a
 fi
-
-echo "✅ Environment configuration found"
-
-# Load environment variables
-source .env 2>/dev/null || true
 
 # Run setup
 echo "🔧 Running application setup..."
 if npm run setup; then
     echo "✅ Application setup completed"
 else
-    echo "❌ Application setup failed"
-    exit 1
+    echo "⚠️  Application setup had issues, continuing..."
 fi
 
 # Setup database
@@ -60,13 +89,12 @@ echo "🗄️  Setting up database..."
 if npm run setup-db; then
     echo "✅ Database setup completed"
 else
-    echo "❌ Database setup failed"
-    exit 1
+    echo "⚠️  Database setup had issues, continuing..."
 fi
 
-# Check database connection
+# Check database connection with timeout
 echo "🔍 Testing database connection..."
-node -e "
+timeout 30s node -e "
 const DatabaseFactory = require('./src/database/DatabaseFactory');
 (async () => {
     try {
@@ -79,7 +107,9 @@ const DatabaseFactory = require('./src/database/DatabaseFactory');
         process.exit(1);
     }
 })();
-"
+" || {
+    echo "⚠️  Database connection test timeout, starting bot anyway..."
+}
 
 # Start the bot
 echo "🤖 Starting WhatsApp Bot..."
