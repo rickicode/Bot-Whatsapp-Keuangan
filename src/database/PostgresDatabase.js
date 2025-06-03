@@ -14,14 +14,24 @@ class PostgresDatabase extends BaseDatabase {
     async initialize() {
         try {
             // Create connection pool
-            this.pool = new Pool({
+            // Configure connection pool with proper SSL settings
+            const poolConfig = {
                 host: this.config.host,
                 port: this.config.port,
                 database: this.config.database,
                 user: this.config.user,
                 password: this.config.password,
-                ssl: this.config.ssl
-            });
+                ssl: this.config.ssl ? {
+                    rejectUnauthorized: false // Required for Supabase
+                } : false
+            };
+
+            // Add extra config if provided (for Supabase)
+            if (this.config.extra) {
+                Object.assign(poolConfig, this.config.extra);
+            }
+
+            this.pool = new Pool(poolConfig);
 
             // Test connection
             this.client = await this.pool.connect();
