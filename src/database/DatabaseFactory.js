@@ -17,18 +17,49 @@ class DatabaseFactory {
 
             case 'postgres':
             case 'postgresql':
-                const config = {
-                    host: process.env.DB_HOST || process.env.DATABASE_HOST || 'localhost',
-                    port: parseInt(process.env.DB_PORT || process.env.DATABASE_PORT) || 5432,
-                    database: process.env.DB_NAME || process.env.DATABASE_NAME || 'financial_bot',
-                    user: process.env.DB_USER || process.env.DATABASE_USER,
-                    password: process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD,
-                    ssl: (process.env.DB_SSL || process.env.DATABASE_SSL) === 'true'
-                };
+            case 'supabase':
+                let config;
+                
+                if (dbType.toLowerCase() === 'supabase') {
+                    // Supabase configuration
+                    const supabaseUrl = process.env.SUPABASE_DB_URL;
+                    if (!supabaseUrl) {
+                        throw new Error('Supabase requires SUPABASE_DB_URL to be set');
+                    }
+                    
+                    // Parse Supabase connection URL
+                    const url = new URL(supabaseUrl);
+                    config = {
+                        host: url.hostname,
+                        port: parseInt(url.port) || 5432,
+                        database: url.pathname.slice(1),
+                        user: url.username,
+                        password: url.password,
+                        ssl: true,
+                        // Additional Supabase specific settings
+                        extra: {
+                            ssl: {
+                                rejectUnauthorized: false
+                            }
+                        }
+                    };
+                    
+                    logger.info('Using Supabase PostgreSQL configuration');
+                } else {
+                    // Standard PostgreSQL configuration
+                    config = {
+                        host: process.env.DB_HOST || process.env.DATABASE_HOST || 'localhost',
+                        port: parseInt(process.env.DB_PORT || process.env.DATABASE_PORT) || 5432,
+                        database: process.env.DB_NAME || process.env.DATABASE_NAME || 'financial_bot',
+                        user: process.env.DB_USER || process.env.DATABASE_USER,
+                        password: process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD,
+                        ssl: (process.env.DB_SSL || process.env.DATABASE_SSL) === 'true'
+                    };
+                }
 
                 // Validate required PostgreSQL config
                 if (!config.user || !config.password) {
-                    throw new Error('PostgreSQL requires DATABASE_USER and DATABASE_PASSWORD to be set');
+                    throw new Error('PostgreSQL/Supabase requires database credentials to be set');
                 }
 
                 return new PostgresDatabase(config);

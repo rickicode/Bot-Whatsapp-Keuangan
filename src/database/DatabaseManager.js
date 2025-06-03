@@ -74,16 +74,33 @@ class DatabaseManager {
     // User management
     async createUser(phone, name = null) {
         try {
-            await this.run(
-                'INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)',
-                [phone, name]
-            );
+            const dbType = this.getDatabaseType();
             
-            // Copy default categories for new user
-            await this.run(`
-                INSERT OR IGNORE INTO categories (user_phone, name, type, color)
-                SELECT ?, name, type, color FROM categories WHERE user_phone = 'default'
-            `, [phone]);
+            if (dbType === 'postgres' || dbType === 'postgresql') {
+                await this.run(
+                    'INSERT INTO users (phone, name) VALUES ($1, $2) ON CONFLICT (phone) DO NOTHING',
+                    [phone, name]
+                );
+                
+                // Copy default categories for new user using PostgreSQL syntax
+                await this.run(`
+                    INSERT INTO categories (user_phone, name, type, color)
+                    SELECT $1, name, type, color FROM categories
+                    WHERE user_phone = 'default'
+                    ON CONFLICT (user_phone, name, type) DO NOTHING
+                `, [phone]);
+            } else {
+                await this.run(
+                    'INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)',
+                    [phone, name]
+                );
+                
+                // Copy default categories for new user using SQLite syntax
+                await this.run(`
+                    INSERT OR IGNORE INTO categories (user_phone, name, type, color)
+                    SELECT ?, name, type, color FROM categories WHERE user_phone = 'default'
+                `, [phone]);
+            }
             
             return await this.getUser(phone);
         } catch (error) {
@@ -98,12 +115,13 @@ class DatabaseManager {
 
     // Transaction methods
     async addTransaction(userPhone, type, amount, categoryId, description, date = null) {
-        const transactionDate = date || new Date().toISOString().split('T')[0];
+        const dbType = this.getDatabaseType();
+        const transactionDate = date || (dbType.includes('postgres') ? 'CURRENT_DATE' : new Date().toISOString().split('T')[0]);
         
         const result = await this.run(
             `INSERT INTO transactions (user_phone, type, amount, category_id, description, date)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [userPhone, type, amount, categoryId, description, transactionDate]
+             VALUES (?, ?, ?, ?, ?, ${dbType.includes('postgres') ? 'COALESCE($6, CURRENT_DATE)' : '?'})`,
+            [userPhone, type, amount, categoryId, description, date || null]
         );
         
         return result.lastID;
@@ -130,13 +148,21 @@ class DatabaseManager {
     }
 
     async updateTransaction(id, userPhone, updates) {
-        const fields = Object.keys(updates).map(key => `${key} = ?`).join(', ');
+        const dbType = this.getDatabaseType();
+        const isPostgres = dbType === 'postgres' || dbType === 'postgresql';
+        
+        let paramCount = 1;
+        const fields = Object.keys(updates).map(key => {
+            return `${key} = ${isPostgres ? '$' + paramCount++ : '?'}`;
+        }).join(', ');
+        
         const values = Object.values(updates);
         values.push(id, userPhone);
         
         await this.run(
-            `UPDATE transactions SET ${fields}, updated_at = CURRENT_TIMESTAMP 
-             WHERE id = ? AND user_phone = ?`,
+            `UPDATE transactions SET ${fields}, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ${isPostgres ? '$' + paramCount++ : '?'}
+             AND user_phone = ${isPostgres ? '$' + paramCount : '?'}`,
             values
         );
     }
@@ -177,19 +203,29 @@ class DatabaseManager {
 
     // Balance calculation
     async getBalance(userPhone, endDate = null) {
-        const dateFilter = endDate ? 'AND date <= ?' : '';
-        const params = endDate ? [userPhone, endDate] : [userPhone];
+        const dbType = this.getDatabaseType();
+        const isPostgres = dbType === 'postgres' || dbType === 'postgresql';
+        
+        let dateFilter = '';
+        let params = [userPhone];
+        
+        if (endDate) {
+            dateFilter = `AND date <= ${isPostgres ? '$2' : '?'}`;
+            params.push(endDate);
+        }
         
         const income = await this.get(`
-            SELECT COALESCE(SUM(amount), 0) as total 
-            FROM transactions 
-            WHERE user_phone = ? AND type = 'income' ${dateFilter}
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM transactions
+            WHERE user_phone = ${isPostgres ? '$1' : '?'}
+            AND type = 'income' ${dateFilter}
         `, params);
         
         const expenses = await this.get(`
-            SELECT COALESCE(SUM(amount), 0) as total 
-            FROM transactions 
-            WHERE user_phone = ? AND type = 'expense' ${dateFilter}
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM transactions
+            WHERE user_phone = ${isPostgres ? '$1' : '?'}
+            AND type = 'expense' ${dateFilter}
         `, params);
         
         return {
@@ -304,11 +340,23 @@ class DatabaseManager {
     }
 
     async setSetting(userPhone, key, value) {
-        await this.run(
-            `INSERT OR REPLACE INTO settings (user_phone, setting_key, setting_value, updated_at) 
-             VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-            [userPhone, key, value]
-        );
+        const dbType = this.getDatabaseType();
+        
+        if (dbType === 'postgres' || dbType === 'postgresql') {
+            await this.run(
+                `INSERT INTO settings (user_phone, setting_key, setting_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (user_phone, setting_key)
+                 DO UPDATE SET setting_value = $3, updated_at = CURRENT_TIMESTAMP`,
+                [userPhone, key, value]
+            );
+        } else {
+            await this.run(
+                `INSERT OR REPLACE INTO settings (user_phone, setting_key, setting_value, updated_at)
+                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+                [userPhone, key, value]
+            );
+        }
     }
 
     // AI interactions log

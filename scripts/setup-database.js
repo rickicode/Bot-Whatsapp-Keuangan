@@ -57,9 +57,10 @@ async function setupDatabase() {
             // Interactive mode for local development
             console.log('Available database options:');
             console.log('1. SQLite3 (recommended for small to medium usage)');
-            console.log('2. PostgreSQL (recommended for production/high usage)\n');
+            console.log('2. PostgreSQL (recommended for production/high usage)');
+            console.log('3. Supabase PostgreSQL (serverless/cloud)\n');
             
-            const choice = await askQuestion('Choose database type (1 or 2): ');
+            const choice = await askQuestion('Choose database type (1, 2, or 3): ');
             
             if (choice === '1') {
                 console.log('\n📦 Setting up SQLite3...');
@@ -95,8 +96,25 @@ async function setupDatabase() {
                 };
                 console.log('✅ PostgreSQL configuration ready');
                 
+            } else if (choice === '3') {
+                console.log('\n🚀 Setting up Supabase PostgreSQL...');
+                console.log('Please provide your Supabase database connection details:\n');
+                
+                const supabaseUrl = await askQuestion('Supabase Database URL: ');
+                
+                if (!supabaseUrl) {
+                    throw new Error('Supabase Database URL is required');
+                }
+                
+                dbConfig = {
+                    DATABASE_TYPE: 'supabase',
+                    SUPABASE_DB_URL: supabaseUrl
+                };
+                
+                console.log('✅ Supabase configuration ready');
+                
             } else {
-                throw new Error('Invalid choice. Please select 1 or 2.');
+                throw new Error('Invalid choice. Please select 1, 2, or 3.');
             }
             
             // Update .env file only in interactive mode
@@ -109,10 +127,23 @@ async function setupDatabase() {
                 console.log('• SQLite database will be created automatically');
                 console.log('• Run: npm run setup');
             } else {
-                console.log('• Make sure PostgreSQL server is running');
-                console.log('• Create the database if it doesn\'t exist:');
-                console.log(`  CREATE DATABASE ${dbConfig.DB_NAME};`);
-                console.log('• Run: npm run setup');
+                if (choice === '2') {
+                    console.log('• Make sure PostgreSQL server is running');
+                    console.log('• Create the database if it doesn\'t exist:');
+                    console.log(`  CREATE DATABASE ${dbConfig.DB_NAME};`);
+                    console.log('• Run: npm run setup');
+                } else if (choice === '3') {
+                    console.log('\n📝 Supabase Setup Instructions:');
+                    console.log('1. Go to your Supabase project dashboard');
+                    console.log('2. Navigate to Settings > Database');
+                    console.log('3. Find your connection info under "Connection string"');
+                    console.log('4. Make sure you have enabled "Bypass RLS" for the bot user');
+                    console.log('5. Run: npm run setup');
+                    console.log('\n⚠️  Important Security Notes:');
+                    console.log('• Store your Supabase URL securely');
+                    console.log('• Never commit the URL to version control');
+                    console.log('• Consider using environment variables in production');
+                }
             }
         }
         
