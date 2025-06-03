@@ -1,4 +1,6 @@
-require('dotenv').config();
+// Load environment variables from .env file or environment
+require('dotenv').config({ path: '.env' });
+
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const DatabaseManager = require('./database/DatabaseManager');
@@ -10,6 +12,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const cron = require('node-cron');
 const ReminderService = require('./services/ReminderService');
+const fs = require('fs');
 
 class WhatsAppFinancialBot {
     constructor() {
@@ -44,9 +47,51 @@ class WhatsAppFinancialBot {
         });
     }
 
+    validateEnvironment() {
+        this.logger.info('🔍 Validating environment variables...');
+        
+        // Log current environment
+        this.logger.info(`📍 NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+        this.logger.info(`📍 DATABASE_TYPE: ${process.env.DATABASE_TYPE || 'not set'}`);
+        
+        // Check for .env file
+        if (fs.existsSync('.env')) {
+            this.logger.info('✅ .env file found');
+        } else {
+            this.logger.warn('⚠️  .env file not found, using environment variables only');
+        }
+        
+        // Check required variables
+        const requiredVars = ['DEEPSEEK_API_KEY', 'BOT_ADMIN_PHONE'];
+        const missingVars = requiredVars.filter(varName => !process.env[varName]);
+        
+        if (missingVars.length > 0) {
+            this.logger.warn(`⚠️  Missing environment variables: ${missingVars.join(', ')}`);
+            this.logger.warn('   Bot functionality may be limited');
+        } else {
+            this.logger.info('✅ All required environment variables present');
+        }
+        
+        // Log database configuration
+        const dbType = process.env.DATABASE_TYPE || 'sqlite3';
+        this.logger.info(`📊 Database type: ${dbType}`);
+        
+        if (dbType === 'sqlite3') {
+            const dbPath = process.env.DB_PATH || './data/financial.db';
+            this.logger.info(`📁 Database path: ${dbPath}`);
+        } else if (dbType === 'postgresql') {
+            const dbHost = process.env.DB_HOST || 'localhost';
+            const dbName = process.env.DB_NAME || 'financial_bot';
+            this.logger.info(`🐘 PostgreSQL: ${dbHost}/${dbName}`);
+        }
+    }
+
     async initialize() {
         try {
             this.logger.info('🚀 Initializing WhatsApp Financial Bot...');
+            
+            // Validate environment variables
+            this.validateEnvironment();
 
             // Initialize database
             this.db = new DatabaseManager();

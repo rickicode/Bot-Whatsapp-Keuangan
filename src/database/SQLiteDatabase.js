@@ -253,6 +253,19 @@ class SQLiteDatabase extends BaseDatabase {
             { name: 'Pengeluaran Lain', type: 'expense', color: '#6c757d' }
         ];
 
+        // Check if default categories already exist
+        const existingCount = await this.get(
+            'SELECT COUNT(*) as count FROM categories WHERE user_phone = ?',
+            ['default']
+        );
+        
+        if (existingCount && existingCount.count > 0) {
+            this.logger.info('Default categories already exist, skipping insertion');
+            return;
+        }
+
+        this.logger.info('Inserting default categories...');
+        
         for (const category of defaultCategories) {
             try {
                 await this.run(
@@ -260,9 +273,14 @@ class SQLiteDatabase extends BaseDatabase {
                     ['default', category.name, category.type, category.color]
                 );
             } catch (error) {
-                this.logger.error(`Error inserting default category ${category.name}:`, error);
+                // Only log if it's not a constraint error (which means category already exists)
+                if (error.code !== 'SQLITE_CONSTRAINT') {
+                    this.logger.error(`Error inserting default category ${category.name}:`, error);
+                }
             }
         }
+        
+        this.logger.info('Default categories setup completed');
     }
 }
 

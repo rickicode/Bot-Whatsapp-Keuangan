@@ -36,9 +36,9 @@ RUN npm ci --only=production && npm cache clean --force
 COPY --chown=whatsappbot:nodejs . .
 
 # Create directories and set permissions
-RUN mkdir -p data logs backups && \
+RUN mkdir -p data logs backups data/whatsapp-session && \
     chown -R whatsappbot:nodejs . && \
-    chmod +x scripts/*.sh
+    chmod +x scripts/*.sh scripts/*.js
 
 # Switch to non-root user
 USER whatsappbot
@@ -50,5 +50,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD node -e "console.log('Health OK'); process.exit(0);" || exit 1
 
-# Default command
-CMD ["node", "src/index.js"]
+# Default command with initialization
+CMD ["sh", "-c", "node scripts/docker-init.js && node src/index.js"]
