@@ -1,32 +1,31 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-# Install system dependencies for native modules
-RUN apk add --no-cache \
+# Install only essential system dependencies
+RUN apt-get update && apt-get install -y \
+    sqlite3 \
+    postgresql-client \
     python3 \
     make \
     g++ \
-    sqlite \
-    postgresql-client \
-    vips-dev
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
-# Install dependencies with engine check bypass
-RUN npm install --production --force
+# Install npm dependencies
+RUN npm install --production --no-optional
 
-# Copy application code
+# Copy source code
 COPY . .
 
-# Create necessary directories
+# Create directories
 RUN mkdir -p data data/sessions logs backups
 
-# Create .env from environment variables (simple approach)
-RUN echo "# Docker environment" > .env && \
-    echo "NODE_ENV=${NODE_ENV:-production}" >> .env && \
+# Create .env from build args
+RUN echo "NODE_ENV=${NODE_ENV:-production}" > .env && \
     echo "DATABASE_TYPE=${DATABASE_TYPE:-sqlite3}" >> .env && \
     echo "DB_PATH=${DB_PATH:-./data/financial.db}" >> .env && \
     echo "BOT_NAME=${BOT_NAME:-Financial Bot}" >> .env && \
@@ -49,7 +48,7 @@ RUN echo "# Docker environment" > .env && \
     echo "DEFAULT_CURRENCY=${DEFAULT_CURRENCY:-IDR}" >> .env && \
     echo "CURRENCY_SYMBOL=${CURRENCY_SYMBOL:-Rp}" >> .env && \
     echo "ENABLE_AI_FEATURES=${ENABLE_AI_FEATURES:-true}" >> .env && \
-    echo "ENABLE_OCR=${ENABLE_OCR:-true}" >> .env && \
+    echo "ENABLE_OCR=${ENABLE_OCR:-false}" >> .env && \
     echo "ENABLE_REMINDERS=${ENABLE_REMINDERS:-true}" >> .env && \
     echo "ASK_CATEGORY_IF_UNKNOWN=${ASK_CATEGORY_IF_UNKNOWN:-true}" >> .env && \
     echo "TZ=${TZ:-Asia/Jakarta}" >> .env && \
@@ -59,5 +58,5 @@ RUN echo "# Docker environment" > .env && \
 # Expose port
 EXPOSE 3000
 
-# Start the application directly
+# Start application
 CMD ["npm", "start"]
