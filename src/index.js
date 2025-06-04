@@ -64,7 +64,7 @@ class WhatsAppFinancialBot {
         // Serve static files from public directory
         this.app.use(express.static(path.join(__dirname, 'public')));
         
-        // QR Code state
+        // QR Code state - initialize as disconnected
         this.currentQRCode = null;
         this.isWhatsAppConnected = false;
         
@@ -141,9 +141,12 @@ class WhatsAppFinancialBot {
         });
 
         this.app.get('/qrscan/status', (req, res) => {
+            // Check if we actually have an active WhatsApp connection
+            const hasActiveConnection = this.sock && this.sock.readyState === 'open' && this.isWhatsAppConnected;
+            
             res.json({
                 qr: this.currentQRCode,
-                connected: this.isWhatsAppConnected,
+                connected: hasActiveConnection,
                 error: null
             });
         });
@@ -325,6 +328,10 @@ class WhatsAppFinancialBot {
     }
 
     async connectToBaileys() {
+        // Reset connection status when initializing connection
+        this.isWhatsAppConnected = false;
+        this.currentQRCode = null;
+        
         const { state, saveCreds } = await useMultiFileAuthState('./data/sessions');
         
         // Fetch latest version of WA Web
@@ -387,6 +394,10 @@ class WhatsAppFinancialBot {
                     }
 
                     if (connection === 'close') {
+                        // Reset connection status when closed
+                        this.isWhatsAppConnected = false;
+                        this.currentQRCode = null;
+                        
                         // Reconnect if not logged out
                         const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                         this.logger.info('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
@@ -404,6 +415,9 @@ class WhatsAppFinancialBot {
                         
                         this.setupCronJobs();
                         this.setupPeriodicCleanup();
+                    } else if (connection === 'connecting') {
+                        this.logger.info('🔄 WhatsApp is connecting...');
+                        this.isWhatsAppConnected = false;
                     }
                 }
 

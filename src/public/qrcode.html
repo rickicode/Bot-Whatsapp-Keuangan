@@ -206,11 +206,14 @@
                     const qrContent = document.getElementById('qr-content');
                     const status = document.getElementById('status');
                     
-                    if (data.qr) {
+                    // Priority: QR code always takes precedence over connection status
+                    // This ensures QR code is shown when available, even if connection flag is incorrectly set
+                    if (data.qr && data.qr.trim() !== '') {
                         qrContent.innerHTML = `<img src="data:image/png;base64,${data.qr}" class="qr-code" alt="QR Code">`;
                         status.className = 'status waiting';
                         status.innerHTML = '📱 Scan QR code dengan WhatsApp Anda';
-                    } else if (data.connected) {
+                        isConnected = false; // Reset connection status when QR is available
+                    } else if (data.connected && !data.qr) {
                         qrContent.innerHTML = '<div style="font-size: 48px; color: #27ae60;">✅</div><div style="margin-top: 15px; font-size: 18px; color: #27ae60; font-weight: 600;">Terhubung!</div>';
                         status.className = 'status connected';
                         status.innerHTML = '🎉 Bot WhatsApp berhasil terhubung dan siap digunakan!';
@@ -219,10 +222,12 @@
                         qrContent.innerHTML = '<div style="font-size: 48px; color: #e74c3c;">❌</div><div style="margin-top: 15px; font-size: 16px; color: #e74c3c;">Error</div>';
                         status.className = 'status error';
                         status.innerHTML = `❌ Error: ${data.error}`;
+                        isConnected = false;
                     } else {
                         qrContent.innerHTML = '<div class="loading">⏳ Menunggu QR code...</div>';
                         status.className = 'status waiting';
                         status.innerHTML = '🔄 Menunggu koneksi WhatsApp...';
+                        isConnected = false;
                     }
                 })
                 .catch(error => {
