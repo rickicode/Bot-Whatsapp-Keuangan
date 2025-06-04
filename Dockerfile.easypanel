@@ -50,20 +50,17 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S botuser -u 1001
 
+# Copy optimized dependencies from build stage
+COPY --from=base /app/node_modules ./node_modules
+
 # Copy application code (selective copying)
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY package.json ./
-COPY package-lock.json ./
 COPY .env.example ./
 
-# Copy optimized dependencies
-COPY --from=base /app/node_modules ./node_modules
-
-# Rebuild native modules for production (Alpine compatibility)
-RUN npm install --only=production && \
-    npm rebuild sqlite3 --build-from-source && \
-    npm cache clean --force
+# Ensure native modules are properly linked (no rebuild needed)
+RUN npm cache clean --force
 
 # Copy Docker configuration files
 COPY docker/supervisord.conf /etc/supervisord.conf
