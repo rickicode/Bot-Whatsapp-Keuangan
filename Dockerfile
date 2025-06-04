@@ -16,7 +16,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies with engine check bypass
-RUN npm install
+RUN npm update
 
 # Copy application code
 COPY . .
