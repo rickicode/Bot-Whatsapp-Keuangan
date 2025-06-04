@@ -925,24 +925,54 @@ Bot akan tampilkan menu kategori untuk dipilih!
 
             const pending = global.pendingTransactions.get(userPhone);
             
-            // Check if pending transaction is too old (5 minutes)
-            if (Date.now() - pending.timestamp > 300000) {
+            // Check if pending transaction is too old (3 minutes - reduced to prevent hanging)
+            if (Date.now() - pending.timestamp > 180000) {
                 global.pendingTransactions.delete(userPhone);
+                this.logger.info(`Pending transaction for ${userPhone} expired and cleaned up`);
                 await message.reply('⏰ Waktu konfirmasi kategori habis. Silakan ulangi transaksi.');
+                return true;
+            }
+
+            // Check for timeout or invalid responses
+            if (!text || text.trim().length === 0) {
+                this.logger.warn(`Empty response from ${userPhone} for pending transaction`);
+                return true; // Don't process empty responses
+            }
+
+            const trimmedText = text.trim().toLowerCase();
+            
+            // Handle cancel commands
+            if (trimmedText === 'batal' || trimmedText === 'cancel' || trimmedText === 'stop') {
+                global.pendingTransactions.delete(userPhone);
+                await message.reply('❌ Konfirmasi kategori dibatalkan.');
                 return true;
             }
 
             let selectedCategory = null;
 
+            // Track retry attempts to prevent infinite loops
+            if (!pending.retryCount) {
+                pending.retryCount = 0;
+            }
+            pending.retryCount++;
+
+            // Max 3 retry attempts before cleanup
+            if (pending.retryCount > 3) {
+                global.pendingTransactions.delete(userPhone);
+                this.logger.warn(`Max retry attempts reached for ${userPhone}, cleaning up pending transaction`);
+                await message.reply('❌ Terlalu banyak percobaan. Silakan mulai transaksi baru dengan format yang benar.');
+                return true;
+            }
+
             // Check if user sent a number
-            const categoryIndex = parseInt(text.trim()) - 1;
+            const categoryIndex = parseInt(trimmedText) - 1;
             if (!isNaN(categoryIndex) && categoryIndex >= 0 && categoryIndex < pending.categories.length) {
                 selectedCategory = pending.categories[categoryIndex];
             } else {
                 // Check if user typed category name
                 selectedCategory = pending.categories.find(c =>
-                    c.name.toLowerCase().includes(text.toLowerCase()) ||
-                    text.toLowerCase().includes(c.name.toLowerCase())
+                    c.name.toLowerCase().includes(trimmedText) ||
+                    trimmedText.includes(c.name.toLowerCase())
                 );
             }
 
@@ -993,7 +1023,17 @@ Bot akan tampilkan menu kategori untuk dipilih!
                 global.pendingTransactions.delete(userPhone);
                 return true;
             } else {
-                await message.reply('❌ Kategori tidak valid. Silakan pilih nomor yang benar atau ketik nama kategori yang ada.');
+                // Update pending transaction with retry count
+                global.pendingTransactions.set(userPhone, pending);
+                
+                const remainingAttempts = 3 - pending.retryCount;
+                await message.reply(
+                    `❌ Kategori tidak valid. Silakan pilih nomor yang benar atau ketik nama kategori yang ada.\n\n` +
+                    `📋 Kategori yang tersedia:\n` +
+                    pending.categories.map((cat, index) => `${index + 1}. ${cat.name}`).join('\n') +
+                    `\n\n💡 Sisa percobaan: ${remainingAttempts}\n` +
+                    `Ketik "batal" untuk membatalkan.`
+                );
                 return true;
             }
         } catch (error) {

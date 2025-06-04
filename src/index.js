@@ -14,6 +14,7 @@ const CommandHandler = require('./handlers/CommandHandler');
 const AIService = require('./services/AIService');
 const IndonesianAIAssistant = require('./services/IndonesianAIAssistant');
 const Logger = require('./utils/Logger');
+const AntiSpamManager = require('./utils/AntiSpamManager');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -31,6 +32,7 @@ class WhatsAppFinancialBot {
         this.indonesianAI = null;
         this.reminderService = null;
         this.logger = new Logger();
+        this.antiSpam = new AntiSpamManager();
         this.app = express();
         this.setupExpress();
         this.ensureDataDirectories();
@@ -66,14 +68,71 @@ class WhatsAppFinancialBot {
         this.currentQRCode = null;
         this.isWhatsAppConnected = false;
         
-        // Health check endpoint
-        this.app.get('/health', (req, res) => {
-            res.json({
-                status: 'OK',
-                timestamp: new Date().toISOString(),
-                uptime: process.uptime(),
-                whatsapp_connected: this.isWhatsAppConnected
-            });
+        // Enhanced health check endpoint
+        this.app.get('/health', async (req, res) => {
+            try {
+                const health = {
+                    status: 'OK',
+                    timestamp: new Date().toISOString(),
+                    uptime: process.uptime(),
+                    memory: process.memoryUsage(),
+                    whatsapp: {
+                        connected: this.isWhatsAppConnected,
+                        qrRequired: this.currentQRCode ? true : false
+                    },
+                    database: {
+                        status: 'unknown'
+                    },
+                    antiSpam: {
+                        initialized: this.antiSpam ? true : false
+                    },
+                    sessions: {
+                        pending: global.pendingTransactions ? global.pendingTransactions.size : 0,
+                        edit: global.editSessions ? global.editSessions.size : 0,
+                        delete: global.deleteConfirmations ? global.deleteConfirmations.size : 0
+                    }
+                };
+
+                // Test database connection
+                if (this.db) {
+                    try {
+                        await this.db.testConnection();
+                        health.database.status = 'connected';
+                    } catch (error) {
+                        health.database.status = 'error';
+                        health.database.error = error.message;
+                        health.status = 'DEGRADED';
+                    }
+                } else {
+                    health.database.status = 'not_initialized';
+                    health.status = 'DEGRADED';
+                }
+
+                // Check anti-spam status
+                if (this.antiSpam) {
+                    try {
+                        const stats = this.antiSpam.getStats();
+                        health.antiSpam.emergencyBrakeActive = stats.global.emergencyBrakeActive;
+                        health.antiSpam.messagesPerMinute = stats.global.messagesPerMinute;
+                        
+                        if (stats.global.emergencyBrakeActive) {
+                            health.status = 'CRITICAL';
+                        }
+                    } catch (error) {
+                        health.antiSpam.error = error.message;
+                    }
+                }
+
+                const statusCode = health.status === 'OK' ? 200 : health.status === 'DEGRADED' ? 503 : 500;
+                res.status(statusCode).json(health);
+                
+            } catch (error) {
+                res.status(500).json({
+                    status: 'ERROR',
+                    timestamp: new Date().toISOString(),
+                    error: error.message
+                });
+            }
         });
 
         // QR Code routes
@@ -100,6 +159,51 @@ class WhatsAppFinancialBot {
         this.app.post('/webhook', (req, res) => {
             this.logger.info('Webhook received:', req.body);
             res.status(200).json({ status: 'received' });
+        });
+
+        // Anti-spam monitoring endpoints
+        this.app.get('/anti-spam/stats', (req, res) => {
+            try {
+                const stats = this.antiSpam ? this.antiSpam.getStats() : { error: 'Anti-spam not initialized' };
+                res.json({
+                    status: 'OK',
+                    timestamp: new Date().toISOString(),
+                    stats
+                });
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.post('/anti-spam/reset-emergency', (req, res) => {
+            try {
+                if (this.antiSpam) {
+                    this.antiSpam.resetEmergencyBrake();
+                    res.json({ status: 'Emergency brake reset', timestamp: new Date().toISOString() });
+                } else {
+                    res.status(500).json({ error: 'Anti-spam not initialized' });
+                }
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.post('/anti-spam/remove-cooldown/:phone', (req, res) => {
+            try {
+                const phone = req.params.phone;
+                if (this.antiSpam) {
+                    const removed = this.antiSpam.removeCooldown(phone);
+                    res.json({
+                        status: removed ? 'Cooldown removed' : 'User not found',
+                        phone,
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    res.status(500).json({ error: 'Anti-spam not initialized' });
+                }
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
         });
     }
 
@@ -299,6 +403,7 @@ class WhatsAppFinancialBot {
                         this.currentQRCode = null;
                         
                         this.setupCronJobs();
+                        this.setupPeriodicCleanup();
                     }
                 }
 
@@ -331,6 +436,13 @@ class WhatsAppFinancialBot {
         // Skip if no message content
         if (!message.message) return;
 
+        // Check if this is an outgoing message (sent by bot)
+        const isFromMe = message.key.fromMe;
+        if (isFromMe) {
+            // This is a message sent by the bot, don't process it
+            return;
+        }
+
         // Extract message text
         const messageText = this.getMessageText(message);
         if (!messageText) return;
@@ -339,15 +451,53 @@ class WhatsAppFinancialBot {
         const userJid = message.key.remoteJid;
         const userPhone = userJid.replace('@s.whatsapp.net', '');
 
-        // Log the message
-        this.logger.info(`📨 Message from ${userPhone}: ${messageText}`);
+        // Check incoming message against anti-spam
+        const incomingCheck = await this.antiSpam.checkMessageAllowed(userPhone, messageText, false);
+        if (!incomingCheck.allowed) {
+            this.logger.warn(`🛡️ Incoming message blocked for ${userPhone}: ${incomingCheck.reason}`);
+            
+            // Only send rate limit message if user is not in cooldown (to avoid spam)
+            if (incomingCheck.reason !== 'user_in_cooldown') {
+                await this.sock.sendMessage(userJid, { text: incomingCheck.message });
+            }
+            return;
+        }
+
+        // Log incoming message (only from users, not bot responses)
+        this.logger.info(`📨 Received from ${userPhone}: ${messageText}`);
 
         // Create a message object compatible with the handlers
         const compatibleMessage = {
             from: userJid,
             body: messageText,
             reply: async (text) => {
-                await this.sock.sendMessage(userJid, { text });
+                try {
+                    // Check outgoing message against anti-spam (critical for preventing bans!)
+                    const outgoingCheck = await this.antiSpam.checkMessageAllowed(userPhone, text, true);
+                    if (!outgoingCheck.allowed) {
+                        this.logger.error(`🛡️ Outgoing message blocked for ${userPhone}: ${outgoingCheck.reason}`);
+                        
+                        // If emergency brake or global limit, log critical error
+                        if (outgoingCheck.reason === 'emergency_brake' || outgoingCheck.reason.includes('global')) {
+                            this.logger.error('🚨 CRITICAL: Global rate limit reached, stopping outgoing messages to prevent WhatsApp ban');
+                        }
+                        
+                        return; // Don't send the message
+                    }
+
+                    // Log outgoing message from bot
+                    this.logger.info(`📤 Bot reply to ${userPhone}: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
+                    
+                    // Send message and ensure it's marked as from bot
+                    await this.sock.sendMessage(userJid, {
+                        text: text,
+                        // Add metadata to help identify bot messages
+                        quoted: message
+                    });
+                } catch (error) {
+                    this.logger.error(`Failed to send reply to ${userPhone}:`, error);
+                    throw error;
+                }
             }
         };
 
@@ -365,7 +515,9 @@ class WhatsAppFinancialBot {
             
         } catch (error) {
             this.logger.error('Error handling message:', error);
-            await this.sock.sendMessage(userJid, { text: '❌ Terjadi kesalahan saat memproses pesan Anda.' });
+            const errorMsg = '❌ Terjadi kesalahan saat memproses pesan Anda.';
+            this.logger.info(`📤 Bot error reply to ${userPhone}: ${errorMsg}`);
+            await this.sock.sendMessage(userJid, { text: errorMsg });
         }
     }
 
@@ -423,6 +575,64 @@ class WhatsAppFinancialBot {
                 this.logger.error('❌ Weekly summary failed:', error);
             }
         });
+    }
+
+    setupPeriodicCleanup() {
+        // Clean up expired pending transactions every 2 minutes
+        setInterval(() => {
+            try {
+                const now = Date.now();
+                let cleanedCount = 0;
+
+                // Clean up pending transactions older than 3 minutes
+                if (global.pendingTransactions) {
+                    for (const [userPhone, transaction] of global.pendingTransactions.entries()) {
+                        if (now - transaction.timestamp > 180000) { // 3 minutes
+                            global.pendingTransactions.delete(userPhone);
+                            cleanedCount++;
+                        }
+                    }
+                }
+
+                // Clean up edit sessions older than 10 minutes
+                if (global.editSessions) {
+                    for (const [userPhone, session] of global.editSessions.entries()) {
+                        if (now - session.timestamp > 600000) { // 10 minutes
+                            global.editSessions.delete(userPhone);
+                            cleanedCount++;
+                        }
+                    }
+                }
+
+                // Clean up delete confirmations older than 5 minutes
+                if (global.deleteConfirmations) {
+                    for (const [userPhone, confirmation] of global.deleteConfirmations.entries()) {
+                        if (now - confirmation.timestamp > 300000) { // 5 minutes
+                            global.deleteConfirmations.delete(userPhone);
+                            cleanedCount++;
+                        }
+                    }
+                }
+
+                // Clean up auto categorization suggestions older than 10 minutes
+                if (global.autoCategorizationSuggestions) {
+                    for (const [userPhone, suggestions] of global.autoCategorizationSuggestions.entries()) {
+                        if (now - suggestions.timestamp > 600000) { // 10 minutes
+                            global.autoCategorizationSuggestions.delete(userPhone);
+                            cleanedCount++;
+                        }
+                    }
+                }
+
+                if (cleanedCount > 0) {
+                    this.logger.info(`🧹 Periodic cleanup: removed ${cleanedCount} expired sessions`);
+                }
+            } catch (error) {
+                this.logger.error('Error during periodic cleanup:', error);
+            }
+        }, 120000); // Every 2 minutes
+
+        this.logger.info('⏰ Periodic cleanup scheduler started (every 2 minutes)');
     }
 
     async shutdown() {

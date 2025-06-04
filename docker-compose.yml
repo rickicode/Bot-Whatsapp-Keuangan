@@ -1,24 +1,32 @@
 services:
   # WhatsApp Bot Service
   whatsapp-bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: whatsapp-financial-bot
     restart: unless-stopped
     env_file:
       - .env
-    # environment:
-    #   - NODE_ENV=production
-    #   - DATABASE_TYPE=postgresql
-    #   - DB_HOST=postgres
-    #   - DB_PORT=5432
-    #   - DB_NAME=financial_bot
-    #   - DB_USER=botuser
-    #   - DB_PASSWORD=botpassword
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Jakarta
+      # Anti-spam settings for production
+      - ANTI_SPAM_USER_PER_MINUTE=10
+      - ANTI_SPAM_GLOBAL_PER_MINUTE=50
+      - ANTI_SPAM_EMERGENCY_BRAKE=true
+      - ANTI_SPAM_EMERGENCY_THRESHOLD=80
+      # Enable features
+      - ENABLE_AI_FEATURES=true
+      - ENABLE_OCR=true
+      - ENABLE_REMINDERS=true
+      - ASK_CATEGORY_IF_UNKNOWN=true
     volumes:
       - ./data:/app/data
       - ./data/sessions:/app/data/sessions
       - ./logs:/app/logs
       - ./backups:/app/backups
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,6 +34,21 @@ services:
       - "3000:3000"
     networks:
       - bot-network
+    healthcheck:
+      test: ["/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.docker.compose.service=whatsapp-financial-bot"
+      - "monitoring=enabled"
+      - "backup=enabled"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # PostgreSQL Database
   postgres:
@@ -49,10 +72,163 @@ services:
       start_period: 30s
     networks:
       - bot-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Database backup service
+  db-backup:
+    image: postgres:15-alpine
+    container_name: financial-db-backup
+    restart: unless-stopped
+    environment:
+      - PGUSER=botuser
+      - PGPASSWORD=botpassword
+      - PGHOST=postgres
+      - PGDATABASE=financial_bot
+    volumes:
+      - ./backups:/backups
+      - ./scripts:/scripts:ro
+    command: >
+      sh -c "
+        echo 'Database backup service started at $$(date)';
+        while true; do
+          sleep 3600;
+          echo 'Creating database backup at $$(date)...';
+          pg_dump -h $$PGHOST -U $$PGUSER -d $$PGDATABASE > /backups/backup_$$(date +%Y%m%d_%H%M%S).sql;
+          find /backups -name 'backup_*.sql' -mtime +7 -delete;
+          echo 'Backup completed, old backups cleaned';
+        done
+      "
+    networks:
+      - bot-network
+    profiles:
+      - backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Anti-spam monitoring service
+  monitor:
+    build: .
+    container_name: financial-monitor
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - BOT_URL=http://whatsapp-bot:3000
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./logs:/app/logs:ro
+    command: >
+      sh -c "
+        echo 'Starting monitoring service...';
+        sleep 60;
+        while true; do
+          echo 'Running anti-spam check at $$(date)...';
+          node scripts/anti-spam-monitor.js stats || echo 'Monitor check failed';
+          sleep 300;
+        done
+      "
+    networks:
+      - bot-network
+    profiles:
+      - monitoring
+    depends_on:
+      - whatsapp-bot
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Session cleanup service
+  cleanup:
+    build: .
+    container_name: financial-cleanup
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./logs:/app/logs
+    command: >
+      sh -c "
+        echo 'Starting cleanup service...';
+        sleep 120;
+        while true; do
+          echo 'Running session cleanup at $$(date)...';
+          node scripts/cleanup-sessions.js cleanup || echo 'Cleanup failed';
+          sleep 600;
+        done
+      "
+    networks:
+      - bot-network
+    profiles:
+      - cleanup
+    depends_on:
+      - whatsapp-bot
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Log viewer (Dozzle)
+  logs:
+    image: amir20/dozzle:latest
+    container_name: financial-logs
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - bot-network
+    profiles:
+      - logs
+    environment:
+      - DOZZLE_LEVEL=info
+      - DOZZLE_TAILSIZE=300
+      - DOZZLE_FILTER=name=whatsapp-financial-bot,postgres-financial-bot
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Watchtower for auto-updates (optional)
+  watchtower:
+    image: containrrr/watchtower
+    container_name: financial-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+    networks:
+      - bot-network
+    profiles:
+      - auto-update
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   postgres_data:
+    driver: local
 
 networks:
   bot-network:
     driver: bridge
+    name: financial-bot-network
