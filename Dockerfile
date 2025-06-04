@@ -35,8 +35,13 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy application code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p /app/data /app/logs /app/backups /app/exports
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/data /app/logs /app/backups /app/exports && \
+    chmod 755 /app/data /app/logs /app/backups /app/exports
+
+# Ensure logs directory is writable and create symlinks for Docker logging
+RUN ln -sf /dev/stdout /app/logs/app.log && \
+    ln -sf /dev/stderr /app/logs/error.log
 
 # Create cron job files
 RUN echo "*/5 * * * * cd /app && /usr/local/bin/node scripts/cleanup-sessions.js cleanup >> /app/logs/cron-cleanup.log 2>&1" > /etc/cron.d/session-cleanup && \
@@ -51,6 +56,21 @@ RUN chmod +x /app/entrypoint.sh
 # Expose port
 EXPOSE 3000
 
+
+# Add logging configuration
+ENV NODE_OPTIONS="--max-old-space-size=512"
+
+# Add healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD node -e "const http = require('http'); \
+    const options = { hostname: 'localhost', port: 3000, path: '/health', timeout: 5000 }; \
+    const req = http.request(options, (res) => { \
+        if (res.statusCode === 200 || res.statusCode === 503) { process.exit(0); } else { process.exit(1); } \
+    }); \
+    req.on('error', () => process.exit(1)); \
+    req.on('timeout', () => process.exit(1)); \
+    req.setTimeout(5000); \
+    req.end();"
 
 # Set entrypoint and command
 ENTRYPOINT ["/app/entrypoint.sh"]

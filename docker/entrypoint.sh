@@ -16,25 +16,15 @@ crond
 # Set up signal handlers for graceful shutdown
 cleanup() {
     echo "🛑 Received shutdown signal, cleaning up..."
-    if [ ! -z "$APP_PID" ]; then
-        kill -TERM "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
+    # Signal will be passed to the exec'd process automatically
     exit 0
 }
 
 trap cleanup SIGTERM SIGINT
 
-# Execute the main command in background and wait
+# Execute the main command directly (no background process)
 echo "🚀 Starting application..."
-"$@" &
-APP_PID=$!
-echo "📱 Application started with PID: $APP_PID"
+echo "📱 Application command: $@"
 
-# Wait for the application process
-wait "$APP_PID"
-APP_EXIT_CODE=$?
-
-# Log exit information
-echo "🏁 Application exited with code: $APP_EXIT_CODE"
-exit $APP_EXIT_CODE
+# Execute the command directly to ensure proper log streaming
+exec "$@"
