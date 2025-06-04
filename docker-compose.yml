@@ -1,28 +1,22 @@
-# Docker Compose untuk VPS (dengan PostgreSQL)
-version: '3.8'
-
 services:
   # WhatsApp Bot Service
   whatsapp-bot:
     build: .
     container_name: whatsapp-financial-bot
     restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - DATABASE_TYPE=postgresql
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=financial_bot
-      - DB_USER=botuser
-      - DB_PASSWORD=botpassword
-      - ENABLE_AI_FEATURES=true
-      - LOG_LEVEL=info
-      # Tambahkan environment variables Anda di sini
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-your_api_key_here}
-      - BOT_ADMIN_PHONE=${BOT_ADMIN_PHONE:-+62xxxxxxxxxx}
-      - ALLOWED_USERS=${ALLOWED_USERS:-}
+    env_file:
+      - .env
+    # environment:
+    #   - NODE_ENV=production
+    #   - DATABASE_TYPE=postgresql
+    #   - DB_HOST=postgres
+    #   - DB_PORT=5432
+    #   - DB_NAME=financial_bot
+    #   - DB_USER=botuser
+    #   - DB_PASSWORD=botpassword
     volumes:
       - ./data:/app/data
+      - ./data/sessions:/app/data/sessions
       - ./logs:/app/logs
       - ./backups:/app/backups
     depends_on:

@@ -1,24 +1,32 @@
-FROM node:20-alpine AS builder
+FROM node:22 AS builder
 
 WORKDIR /app
 
 COPY package*.json .
 
-# Install git
-RUN apk add --no-cache git \
-    sqlite \
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    sqlite3 \
     postgresql-client \
     python3 \
     make \
-    g++
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
 
-RUN npm install --quiet
+RUN npm install
 
-# Create directories
-RUN mkdir -p data data/sessions logs backups
+# Create directories with proper permissions for session persistence
+RUN mkdir -p data data/sessions logs backups && \
+    chmod 777 data data/sessions logs backups
+
+# Declare volumes for persistent data (includes WhatsApp sessions)
+VOLUME ["/app/data", "/app/logs", "/app/backups"]
+
+# Keep running as root user for file access permissions
 
 # Create .env from build args
 RUN echo "NODE_ENV=${NODE_ENV:-production}" > .env && \
