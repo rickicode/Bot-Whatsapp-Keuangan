@@ -200,19 +200,39 @@ Anti-spam Stats:  http://localhost:3000/anti-spam/stats
 
 ## 🔧 Troubleshooting
 
-### **Container tidak start:**
+### **Exit Status 9 (Node.js Process Error):**
 ```bash
-# Check logs
+# Check logs untuk error details
 docker logs whatsapp-bot-easypanel
 
-# Check build
-npm run easypanel:build
+# Check environment variables
+docker exec whatsapp-bot-easypanel env | grep -E "(NODE|DATABASE|AI)"
+
+# Restart dengan fresh logs
+npm run easypanel:stop
+npm run easypanel:start
+docker logs -f whatsapp-bot-easypanel
 ```
 
-### **Service tidak jalan:**
+### **Container tidak start:**
+```bash
+# Check logs detail
+docker logs whatsapp-bot-easypanel
+
+# Check build errors
+npm run easypanel:build
+
+# Check image exists
+docker images | grep whatsapp-bot-easypanel
+```
+
+### **Service restart loop:**
 ```bash
 # Check supervisor status
 npm run easypanel:status
+
+# Check individual process logs
+docker exec whatsapp-bot-easypanel supervisorctl tail whatsapp-bot
 
 # Restart specific service
 docker exec whatsapp-bot-easypanel supervisorctl restart whatsapp-bot
@@ -223,6 +243,13 @@ docker exec whatsapp-bot-easypanel supervisorctl restart whatsapp-bot
 # Verify Supabase config in .env
 # Check DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD
 # Ensure DATABASE_SSL=true untuk Supabase
+
+# Test connection
+docker exec whatsapp-bot-easypanel node -e "
+const DatabaseManager = require('./src/database/DatabaseManager');
+const db = new DatabaseManager();
+db.testConnection().then(() => console.log('DB OK')).catch(console.error);
+"
 ```
 
 ### **High memory usage:**
@@ -230,9 +257,24 @@ docker exec whatsapp-bot-easypanel supervisorctl restart whatsapp-bot
 # Check container stats
 docker stats whatsapp-bot-easypanel
 
+# Check Node.js memory usage
+docker exec whatsapp-bot-easypanel ps aux | grep node
+
 # Restart container
 npm run easypanel:stop
 npm run easypanel:start
+```
+
+### **Logs tidak muncul:**
+```bash
+# Semua logs sekarang ditampilkan di Docker logs
+docker logs -f whatsapp-bot-easypanel
+
+# Check supervisor logs
+docker exec whatsapp-bot-easypanel supervisorctl status
+
+# Check if processes running
+docker exec whatsapp-bot-easypanel ps aux | grep -E "(node|supervisord)"
 ```
 
 ## 🎯 Production Tips
