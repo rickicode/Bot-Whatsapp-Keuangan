@@ -15,7 +15,7 @@ FROM node:20-alpine
 
 # Install cron and other necessary packages
 RUN apk add --no-cache \
-    cron \
+    dcron \
     tzdata \
     bash \
     && rm -rf /var/cache/apk/*
