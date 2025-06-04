@@ -3,10 +3,11 @@
 
 FROM node:22-alpine AS base
 
-# Install minimal build dependencies (no PostgreSQL client needed)
+# Install build dependencies including PostgreSQL client for Supabase
 RUN apk add --no-cache \
     git \
     sqlite \
+    postgresql-client \
     python3 \
     make \
     g++ \
@@ -17,8 +18,9 @@ WORKDIR /app
 # Copy package files for dependency installation
 COPY package*.json ./
 
-# Install dependencies with aggressive optimization
+# Install dependencies and rebuild native modules for Alpine
 RUN npm ci --only=production --ignore-scripts && \
+    npm rebuild sqlite3 --build-from-source && \
     npm cache clean --force && \
     # Remove unnecessary files for smaller image
     find node_modules -name "*.md" -delete && \
@@ -31,12 +33,13 @@ RUN npm ci --only=production --ignore-scripts && \
 # Ultra-minimal production stage with supervisord
 FROM node:22-alpine AS production
 
-# Install only essential runtime dependencies (no PostgreSQL client)
+# Install essential runtime dependencies including PostgreSQL client
 RUN apk add --no-cache \
     supervisor \
     curl \
     bash \
     sqlite \
+    postgresql-client \
     tzdata \
     dumb-init \
     && rm -rf /var/cache/apk/* /tmp/*
@@ -47,14 +50,20 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S botuser -u 1001
 
-# Copy optimized dependencies
-COPY --from=base /app/node_modules ./node_modules
-
 # Copy application code (selective copying)
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY package.json ./
+COPY package-lock.json ./
 COPY .env.example ./
+
+# Copy optimized dependencies
+COPY --from=base /app/node_modules ./node_modules
+
+# Rebuild native modules for production (Alpine compatibility)
+RUN npm install --only=production && \
+    npm rebuild sqlite3 --build-from-source && \
+    npm cache clean --force
 
 # Copy Docker configuration files
 COPY docker/supervisord.conf /etc/supervisord.conf
