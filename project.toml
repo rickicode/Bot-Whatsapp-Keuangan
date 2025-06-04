@@ -1,0 +1,84 @@
+[_]
+schema-version = "0.2"
+
+[project]
+id = "whatsapp-financial-bot"
+name = "WhatsApp Financial Bot"
+version = "1.0.0"
+
+[[project.licenses]]
+type = "MIT"
+
+[build]
+include = [
+    "**/*.js",
+    "**/*.json",
+    "package*.json",
+    "scripts/",
+    "src/",
+    ".env.example",
+    "README.md"
+]
+
+exclude = [
+    "node_modules/",
+    "*.log",
+    "data/",
+    "logs/",
+    "backups/",
+    ".git/",
+    "Dockerfile*",
+    "docker-compose*.yml"
+]
+
+[[build.buildpacks]]
+uri = "heroku/nodejs"
+version = "3.0.4"
+
+[[build.env]]
+name = "NODE_VERSION"
+value = "20"
+
+[[build.env]]
+name = "NPM_VERSION"
+value = "9"
+
+[[build.env]]
+name = "NODE_ENV"
+value = "production"
+
+[[build.env]]
+name = "PORT"
+value = "3000"
+
+[[build.env]]
+name = "LOG_LEVEL"
+value = "info"
+
+[[build.env]]
+name = "DATABASE_TYPE"
+value = "sqlite3"
+
+[[build.env]]
+name = "DB_PATH"
+value = "./data/financial.db"
+
+[[build.env]]
+name = "ENABLE_AI_FEATURES"
+value = "true"
+
+[[build.env]]
+name = "ENABLE_OCR"
+value = "false"
+
+[[build.env]]
+name = "ENABLE_REMINDERS"
+value = "true"
+
+[[build.env]]
+name = "TZ"
+value = "Asia/Jakarta"
+
+[metadata]
+[metadata.default-process-types]
+web = "node src/index.js"

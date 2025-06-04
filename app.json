@@ -1,0 +1,124 @@
+{
+  "name": "WhatsApp Financial Bot",
+  "description": "WhatsApp bot for financial management with AI integration",
+  "repository": "https://github.com/your-username/whatsapp-financial-bot",
+  "logo": "https://node-js-sample.herokuapp.com/node.png",
+  "keywords": ["node", "whatsapp", "financial", "bot", "ai", "baileys"],
+  "image": "heroku/nodejs",
+  "stack": "heroku-22",
+  "buildpacks": [
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-apt"
+    },
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "env": {
+    "NODE_ENV": {
+      "description": "Node.js environment",
+      "value": "production"
+    },
+    "NODE_VERSION": {
+      "description": "Node.js version",
+      "value": "20"
+    },
+    "NPM_VERSION": {
+      "description": "npm version",
+      "value": "9"
+    },
+    "DATABASE_TYPE": {
+      "description": "Database type (sqlite3 or postgresql)",
+      "value": "sqlite3"
+    },
+    "DB_PATH": {
+      "description": "SQLite database file path",
+      "value": "./data/financial.db"
+    },
+    "BOT_NAME": {
+      "description": "Name of your WhatsApp bot",
+      "value": "Financial Bot"
+    },
+    "BOT_ADMIN_PHONE": {
+      "description": "Admin phone number (with country code, e.g., +6281234567890)",
+      "required": true
+    },
+    "DEEPSEEK_API_KEY": {
+      "description": "DeepSeek AI API key for AI features",
+      "required": true
+    },
+    "DEEPSEEK_BASE_URL": {
+      "description": "DeepSeek API base URL",
+      "value": "https://api.deepseek.com"
+    },
+    "DEEPSEEK_MODEL": {
+      "description": "DeepSeek AI model to use",
+      "value": "deepseek-chat"
+    },
+    "AI_PROVIDER": {
+      "description": "AI provider (deepseek, openai, or openaicompatible)",
+      "value": "deepseek"
+    },
+    "ENCRYPTION_KEY": {
+      "description": "32-character encryption key for sensitive data",
+      "generator": "secret"
+    },
+    "DEFAULT_LANGUAGE": {
+      "description": "Default language (id for Indonesian)",
+      "value": "id"
+    },
+    "DEFAULT_CURRENCY": {
+      "description": "Default currency code",
+      "value": "IDR"
+    },
+    "CURRENCY_SYMBOL": {
+      "description": "Currency symbol",
+      "value": "Rp"
+    },
+    "ENABLE_AI_FEATURES": {
+      "description": "Enable AI features",
+      "value": "true"
+    },
+    "ENABLE_OCR": {
+      "description": "Enable OCR features",
+      "value": "false"
+    },
+    "ENABLE_REMINDERS": {
+      "description": "Enable reminder features",
+      "value": "true"
+    },
+    "ASK_CATEGORY_IF_UNKNOWN": {
+      "description": "Ask for category if unknown",
+      "value": "true"
+    },
+    "TZ": {
+      "description": "Timezone",
+      "value": "Asia/Jakarta"
+    },
+    "LOG_LEVEL": {
+      "description": "Log level (error, warn, info, debug)",
+      "value": "info"
+    },
+    "LOG_FILE": {
+      "description": "Log file path",
+      "value": "./logs/app.log"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "addons": [
+    {
+      "plan": "heroku-postgresql:essential-0",
+      "options": {
+        "version": "15"
+      }
+    }
+  ],
+  "scripts": {
+    "postdeploy": "node scripts/create-env.js && node scripts/setup-database.js"
+  }
+}
