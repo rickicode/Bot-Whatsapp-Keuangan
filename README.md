@@ -68,9 +68,13 @@ cp .env.example .env
 
 4. **Setup database and start**
 ```bash
-npm run setup
-# For existing databases, run migration for Indonesian AI Assistant
-node scripts/migrate-registration.js
+# Run database migrations
+npm run migrate
+
+# Seed with default data (categories, subscription plans)
+npm run migrate:seed
+
+# Start the application
 npm start
 ```
 
@@ -306,9 +310,46 @@ whatsapp-financial-bot/
 ```bash
 npm start          # Start the bot
 npm run dev        # Development mode with nodemon
-npm run setup      # Initial setup
 npm run backup     # Manual backup
 npm test           # Run tests
+
+# Database Migration Scripts
+npm run migrate          # Run database migrations (safe)
+npm run migrate:seed     # Seed database with default data
+npm run migrate:fresh    # Fresh migration - drops all tables (dev only)
+npm run migrate:help     # Show migration help
+```
+
+### 🗄️ Database Migrations
+
+The bot includes a comprehensive migration system for database management:
+
+#### Quick Migration Commands
+```bash
+# Safe migration (production-ready)
+npm run migrate
+
+# Add default data (categories, subscription plans)
+npm run migrate:seed
+
+# Complete reset (development only - ⚠️ DESTRUCTIVE)
+NODE_ENV=development npm run migrate:fresh
+```
+
+#### Migration Features
+- ✅ **Safe Schema Updates** - Non-destructive migrations for production
+- ✅ **Data Seeding** - Populate database with default categories and plans
+- ✅ **Fresh Reset** - Complete database recreation for development
+- ✅ **Multi-Database Support** - Works with SQLite, PostgreSQL, and Supabase
+- ✅ **Production Protection** - Fresh migrations disabled in production
+- ✅ **Error Handling** - Comprehensive error handling and rollback
+
+#### Database Support
+- **SQLite3** (default) - Perfect for development and small deployments
+- **PostgreSQL** - Recommended for production environments
+- **Supabase** - Cloud PostgreSQL with built-in features
+
+See [Migration Guide](docs/MIGRATION_GUIDE.md) for detailed instructions.
 ```
 
 ### Adding New Commands

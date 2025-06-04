@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-financial-bot
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./exports:/app/exports
+    restart: unless-stopped
+    healthcheck:
+      test: ["/usr/local/bin/healthcheck.sh"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Jakarta
+    networks:
+      - whatsapp-bot-network
+
+networks:
+  whatsapp-bot-network:
+    driver: bridge
+
+volumes:
+  whatsapp_data:
+  whatsapp_logs:
+  whatsapp_backups:
+  whatsapp_exports:

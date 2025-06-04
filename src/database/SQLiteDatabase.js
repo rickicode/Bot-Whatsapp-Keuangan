@@ -303,6 +303,80 @@ class SQLiteDatabase extends BaseDatabase {
             throw error;
         }
     }
+
+    // Migration functions
+    async migrateFresh() {
+        try {
+            this.logger.info('Starting fresh migration for SQLite - This will DROP ALL TABLES and recreate them');
+            
+            await this.dropAllTables();
+            await this.createTables();
+            
+            this.logger.info('Fresh migration completed for SQLite');
+        } catch (error) {
+            this.logger.error('Error during SQLite fresh migration:', error);
+            throw error;
+        }
+    }
+
+    async dropAllTables() {
+        try {
+            this.logger.info('Dropping all SQLite tables...');
+            
+            // Disable foreign keys temporarily
+            await this.run('PRAGMA foreign_keys = OFF');
+            
+            // Get all user tables (excluding system tables)
+            const tables = await this.all(`
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name NOT LIKE 'sqlite_%'
+            `);
+            
+            for (const table of tables) {
+                try {
+                    await this.run(`DROP TABLE IF EXISTS ${table.name}`);
+                    this.logger.info(`Dropped table: ${table.name}`);
+                } catch (error) {
+                    this.logger.warn(`Warning dropping table ${table.name}:`, error.message);
+                }
+            }
+            
+            // Re-enable foreign keys
+            await this.run('PRAGMA foreign_keys = ON');
+            
+            this.logger.info('All SQLite tables dropped successfully');
+        } catch (error) {
+            this.logger.error('Error dropping SQLite tables:', error);
+            throw error;
+        }
+    }
+
+    async migrate() {
+        try {
+            this.logger.info('Running SQLite migrations...');
+            
+            // For now, just ensure tables exist with latest schema
+            await this.createTables();
+            
+            this.logger.info('SQLite migrations completed');
+        } catch (error) {
+            this.logger.error('Error during SQLite migration:', error);
+            throw error;
+        }
+    }
+
+    async seed() {
+        try {
+            this.logger.info('Seeding SQLite database with default data...');
+            
+            await this.insertDefaultCategories();
+            
+            this.logger.info('SQLite seeding completed');
+        } catch (error) {
+            this.logger.error('Error during SQLite seeding:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = SQLiteDatabase;

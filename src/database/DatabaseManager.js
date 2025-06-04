@@ -1250,6 +1250,144 @@ class DatabaseManager {
             this.logger.info('Database pool stats:', stats);
         }
     }
+
+    // Migration functions
+    async migrateFresh() {
+        try {
+            this.logger.info('Starting fresh migration - This will DROP ALL TABLES and recreate them');
+            
+            if (!this.db) {
+                throw new Error('Database belum diinisialisasi');
+            }
+
+            // Call the database-specific fresh migration
+            if (typeof this.db.migrateFresh === 'function') {
+                await this.db.migrateFresh();
+            } else {
+                // Fallback implementation
+                await this.dropAllTables();
+                await this.db.createTables();
+            }
+
+            this.logger.info('Fresh migration completed successfully');
+        } catch (error) {
+            this.logger.error('Error during fresh migration:', error);
+            throw error;
+        }
+    }
+
+    async dropAllTables() {
+        try {
+            this.logger.info('Dropping all tables...');
+            
+            const dbType = this.getDatabaseType();
+            const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
+            
+            if (isPostgres) {
+                // PostgreSQL: Drop tables in order to handle foreign key constraints
+                const tables = [
+                    'ai_interactions',
+                    'whatsapp_sessions',
+                    'registration_sessions',
+                    'user_subscriptions',
+                    'settings',
+                    'bills',
+                    'debts',
+                    'clients',
+                    'transactions',
+                    'categories',
+                    'subscription_plans',
+                    'users'
+                ];
+
+                for (const table of tables) {
+                    try {
+                        await this.run(`DROP TABLE IF EXISTS ${table} CASCADE`);
+                        this.logger.info(`Dropped table: ${table}`);
+                    } catch (error) {
+                        this.logger.warn(`Warning dropping table ${table}:`, error.message);
+                    }
+                }
+            } else {
+                // SQLite: Disable foreign keys and drop all tables
+                await this.run('PRAGMA foreign_keys = OFF');
+                
+                const tables = await this.all(`
+                    SELECT name FROM sqlite_master
+                    WHERE type='table' AND name NOT LIKE 'sqlite_%'
+                `);
+                
+                for (const table of tables) {
+                    try {
+                        await this.run(`DROP TABLE IF EXISTS ${table.name}`);
+                        this.logger.info(`Dropped table: ${table.name}`);
+                    } catch (error) {
+                        this.logger.warn(`Warning dropping table ${table.name}:`, error.message);
+                    }
+                }
+                
+                await this.run('PRAGMA foreign_keys = ON');
+            }
+
+            this.logger.info('All tables dropped successfully');
+        } catch (error) {
+            this.logger.error('Error dropping tables:', error);
+            throw error;
+        }
+    }
+
+    // Run database migrations (for schema updates)
+    async migrate() {
+        try {
+            this.logger.info('Running database migrations...');
+            
+            if (!this.db) {
+                throw new Error('Database belum diinisialisasi');
+            }
+
+            // Call the database-specific migration
+            if (typeof this.db.migrate === 'function') {
+                await this.db.migrate();
+            } else {
+                // Fallback - just ensure tables exist
+                await this.db.createTables();
+            }
+
+            this.logger.info('Database migrations completed successfully');
+        } catch (error) {
+            this.logger.error('Error during migration:', error);
+            throw error;
+        }
+    }
+
+    // Seed database with default data
+    async seed() {
+        try {
+            this.logger.info('Seeding database with default data...');
+            
+            if (!this.db) {
+                throw new Error('Database belum diinisialisasi');
+            }
+
+            // Call the database-specific seeding
+            if (typeof this.db.seed === 'function') {
+                await this.db.seed();
+            } else {
+                // Fallback - call insert methods if they exist
+                if (typeof this.db.insertDefaultCategories === 'function') {
+                    await this.db.insertDefaultCategories();
+                }
+                if (typeof this.db.insertDefaultSubscriptionPlans === 'function') {
+                    await this.db.insertDefaultSubscriptionPlans();
+                }
+            }
+
+            this.logger.info('Database seeding completed successfully');
+        } catch (error) {
+            this.logger.error('Error during seeding:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = DatabaseManager;

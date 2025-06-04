@@ -897,6 +897,100 @@ class PostgresDatabase extends BaseDatabase {
         
         this.logger.info('Default subscription plans setup completed for PostgreSQL');
     }
+
+    // Migration functions
+    async migrateFresh() {
+        try {
+            this.logger.info('Starting fresh migration for PostgreSQL - This will DROP ALL TABLES and recreate them');
+            
+            await this.dropAllTables();
+            await this.createTables();
+            
+            this.logger.info('Fresh migration completed for PostgreSQL');
+        } catch (error) {
+            this.logger.error('Error during PostgreSQL fresh migration:', error);
+            throw error;
+        }
+    }
+
+    async dropAllTables() {
+        let client;
+        try {
+            client = await this.pool.connect();
+            
+            this.logger.info('Dropping all PostgreSQL tables...');
+            
+            // Drop tables in order to handle foreign key constraints
+            const tables = [
+                'ai_interactions',
+                'whatsapp_sessions',
+                'registration_sessions',
+                'user_subscriptions',
+                'settings',
+                'bills',
+                'debts',
+                'clients',
+                'transactions',
+                'categories',
+                'subscription_plans',
+                'users'
+            ];
+
+            for (const table of tables) {
+                try {
+                    await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+                    this.logger.info(`Dropped table: ${table}`);
+                } catch (error) {
+                    this.logger.warn(`Warning dropping table ${table}:`, error.message);
+                }
+            }
+
+            // Drop any remaining triggers and functions
+            try {
+                await client.query('DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE');
+                this.logger.info('Dropped update trigger function');
+            } catch (error) {
+                this.logger.warn('Warning dropping trigger function:', error.message);
+            }
+
+            this.logger.info('All PostgreSQL tables dropped successfully');
+        } catch (error) {
+            this.logger.error('Error dropping PostgreSQL tables:', error);
+            throw error;
+        } finally {
+            if (client) {
+                client.release();
+            }
+        }
+    }
+
+    async migrate() {
+        try {
+            this.logger.info('Running PostgreSQL migrations...');
+            
+            // For now, just ensure tables exist with latest schema
+            await this.createTables();
+            
+            this.logger.info('PostgreSQL migrations completed');
+        } catch (error) {
+            this.logger.error('Error during PostgreSQL migration:', error);
+            throw error;
+        }
+    }
+
+    async seed() {
+        try {
+            this.logger.info('Seeding PostgreSQL database with default data...');
+            
+            await this.insertDefaultCategories();
+            await this.insertDefaultSubscriptionPlans();
+            
+            this.logger.info('PostgreSQL seeding completed');
+        } catch (error) {
+            this.logger.error('Error during PostgreSQL seeding:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = PostgresDatabase;
