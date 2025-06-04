@@ -1,4 +1,8 @@
-FROM node:20-slim
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+
 
 # Install only essential system dependencies
 RUN apt-get update && apt-get install -y \
@@ -10,10 +14,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
-WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package*.json ./
 
 # Install npm dependencies
 RUN npm install --production --no-optional
