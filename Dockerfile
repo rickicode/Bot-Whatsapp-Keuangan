@@ -2,27 +2,20 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+COPY package*.json .
 
-
-# Install only essential system dependencies
-RUN apt-get update && apt-get install -y \
-    sqlite3 \
+# Install git
+RUN apk add --no-cache git \
+    sqlite \
     postgresql-client \
     python3 \
     make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+    g++
 
-# Set working directory
-
-# Copy package files
-COPY package*.json ./
-
-# Install npm dependencies
-RUN npm install --production --no-optional
-
-# Copy source code
 COPY . .
+
+
+RUN npm install --quiet
 
 # Create directories
 RUN mkdir -p data data/sessions logs backups
