@@ -113,17 +113,15 @@ class SQLiteDatabase extends BaseDatabase {
                 last_activity DATETIME DEFAULT CURRENT_TIMESTAMP
             )`,
 
-            // Categories table
+            // Categories table (Global/Fixed categories only)
             `CREATE TABLE IF NOT EXISTS categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_phone TEXT NOT NULL,
                 name TEXT NOT NULL,
                 type TEXT CHECK(type IN ('income', 'expense')) NOT NULL,
                 color TEXT DEFAULT '#007bff',
                 is_active BOOLEAN DEFAULT 1,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_phone) REFERENCES users(phone),
-                UNIQUE(user_phone, name, type)
+                UNIQUE(name, type)
             )`,
 
             // Transactions table
@@ -235,52 +233,75 @@ class SQLiteDatabase extends BaseDatabase {
 
     async insertDefaultCategories() {
         const defaultCategories = [
-            // Income categories (dalam bahasa Indonesia)
+            // Income categories (Pemasukan)
             { name: 'Gaji', type: 'income', color: '#28a745' },
             { name: 'Freelance', type: 'income', color: '#17a2b8' },
             { name: 'Bisnis', type: 'income', color: '#007bff' },
             { name: 'Investasi', type: 'income', color: '#6f42c1' },
+            { name: 'Bonus', type: 'income', color: '#28a745' },
             { name: 'Pemasukan Lain', type: 'income', color: '#20c997' },
             
-            // Expense categories (dalam bahasa Indonesia)
+            // Essential Expense categories (Pengeluaran Wajib)
             { name: 'Makanan', type: 'expense', color: '#fd7e14' },
             { name: 'Transportasi', type: 'expense', color: '#6c757d' },
             { name: 'Utilitas', type: 'expense', color: '#e83e8c' },
-            { name: 'Hiburan', type: 'expense', color: '#dc3545' },
             { name: 'Kesehatan', type: 'expense', color: '#ffc107' },
             { name: 'Belanja', type: 'expense', color: '#198754' },
+            { name: 'Hiburan', type: 'expense', color: '#dc3545' },
             { name: 'Pengeluaran Bisnis', type: 'expense', color: '#0d6efd' },
             { name: 'Pengeluaran Lain', type: 'expense', color: '#6c757d' }
         ];
 
-        // Check if default categories already exist
-        const existingCount = await this.get(
-            'SELECT COUNT(*) as count FROM categories WHERE user_phone = ?',
-            ['default']
-        );
-        
-        if (existingCount && existingCount.count > 0) {
-            this.logger.info('Default categories already exist, skipping insertion');
-            return;
-        }
-
-        this.logger.info('Inserting default categories...');
-        
-        for (const category of defaultCategories) {
-            try {
-                await this.run(
-                    'INSERT OR IGNORE INTO categories (user_phone, name, type, color) VALUES (?, ?, ?, ?)',
-                    ['default', category.name, category.type, category.color]
-                );
-            } catch (error) {
-                // Only log if it's not a constraint error (which means category already exists)
-                if (error.code !== 'SQLITE_CONSTRAINT') {
-                    this.logger.error(`Error inserting default category ${category.name}:`, error);
+        try {
+            this.logger.info('Setting up global fixed categories for SQLite...');
+            
+            // Check existing categories
+            const existingCount = await this.get('SELECT COUNT(*) as count FROM categories');
+            const currentCount = existingCount ? existingCount.count : 0;
+            
+            this.logger.info(`Current categories: ${currentCount}, Required: ${defaultCategories.length}`);
+            
+            // If categories are empty or insufficient, recreate them
+            if (currentCount === 0 || currentCount < defaultCategories.length) {
+                this.logger.info('Recreating global categories...');
+                
+                // Clear existing categories
+                await this.run('DELETE FROM categories');
+                
+                // Insert all default categories as global categories
+                for (const category of defaultCategories) {
+                    try {
+                        const result = await this.run(
+                            'INSERT INTO categories (name, type, color, is_active) VALUES (?, ?, ?, 1)',
+                            [category.name, category.type, category.color]
+                        );
+                        this.logger.info(`✅ Inserted global category: ${category.name} (${category.type}) - ID: ${result.lastID}`);
+                    } catch (error) {
+                        this.logger.error(`❌ Failed to insert category ${category.name}:`, error);
+                    }
                 }
+                
+                // Verify insertion
+                const finalCount = await this.get('SELECT COUNT(*) as count FROM categories');
+                this.logger.info(`✅ Global categories setup completed. Total: ${finalCount.count}`);
+                
+                // Show all inserted categories for verification
+                const allCategories = await this.all(
+                    'SELECT id, name, type FROM categories ORDER BY type, name'
+                );
+                
+                this.logger.info('📋 Global categories:');
+                allCategories.forEach(cat => {
+                    this.logger.info(`   - ${cat.name} (${cat.type}) [ID: ${cat.id}]`);
+                });
+            } else {
+                this.logger.info('Global categories already sufficient, skipping recreation');
             }
+            
+        } catch (error) {
+            this.logger.error('❌ Critical error in insertDefaultCategories:', error);
+            throw error;
         }
-        
-        this.logger.info('Default categories setup completed');
     }
 }
 

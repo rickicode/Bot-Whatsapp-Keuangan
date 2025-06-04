@@ -55,8 +55,15 @@ class ReminderService {
 
             reminderMessage += `💡 Don't forget to record these payments when you make them!`;
 
-            // Send reminder
-            await client.sendMessage(`${userPhone}@c.us`, reminderMessage);
+            // Send reminder - handle both whatsapp-web.js and Baileys format
+            const jid = userPhone.includes('@') ? userPhone : `${userPhone}@s.whatsapp.net`;
+            if (client.sendMessage) {
+                // Baileys format
+                await client.sendMessage(jid, { text: reminderMessage });
+            } else {
+                // Fallback for whatsapp-web.js
+                await client.sendMessage(`${userPhone}@c.us`, reminderMessage);
+            }
 
             this.logger.info(`Bill reminders sent to ${userPhone}`);
 
@@ -102,7 +109,15 @@ class ReminderService {
 
                 message += `💡 Consider following up with your clients or updating the debt status.`;
 
-                await client.sendMessage(`${userPhone}@c.us`, message);
+                // Send overdue debt alert - handle both whatsapp-web.js and Baileys format
+                const jid = userPhone.includes('@') ? userPhone : `${userPhone}@s.whatsapp.net`;
+                if (client.sendMessage) {
+                    // Baileys format
+                    await client.sendMessage(jid, { text: message });
+                } else {
+                    // Fallback for whatsapp-web.js
+                    await client.sendMessage(`${userPhone}@c.us`, message);
+                }
 
                 // Update debt status to overdue
                 const debtIds = debts.map(d => d.id);

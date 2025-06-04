@@ -3,14 +3,59 @@ const Logger = require('../utils/Logger');
 
 class AIService {
     constructor() {
-        this.apiKey = process.env.DEEPSEEK_API_KEY;
-        this.baseURL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
         this.logger = new Logger();
         this.isEnabled = process.env.ENABLE_AI_FEATURES === 'true';
         
+        // Initialize AI provider configuration
+        this.initializeProvider();
+    }
+
+    initializeProvider() {
+        // Get provider type from environment
+        this.provider = process.env.AI_PROVIDER || 'deepseek';
+        
+        switch (this.provider.toLowerCase()) {
+            case 'deepseek':
+                this.apiKey = process.env.DEEPSEEK_API_KEY;
+                this.baseURL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+                this.model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+                break;
+                
+            case 'openai':
+                this.apiKey = process.env.OPENAI_API_KEY;
+                this.baseURL = process.env.OPENAI_BASE_URL || 'https://api.openai.com';
+                this.model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+                break;
+                
+            case 'openaicompatible':
+            case 'openai-compatible':
+                this.apiKey = process.env.OPENAI_COMPATIBLE_API_KEY;
+                this.baseURL = process.env.OPENAI_COMPATIBLE_BASE_URL;
+                this.model = process.env.OPENAI_COMPATIBLE_MODEL || 'gpt-3.5-turbo';
+                
+                if (!this.baseURL) {
+                    this.logger.error('OPENAI_COMPATIBLE_BASE_URL must be set when using openaicompatible provider');
+                    this.isEnabled = false;
+                    return;
+                }
+                break;
+                
+            default:
+                this.logger.error(`Unknown AI provider: ${this.provider}. Supported providers: deepseek, openai, openaicompatible`);
+                this.isEnabled = false;
+                return;
+        }
+        
+        // Validate configuration
         if (!this.apiKey && this.isEnabled) {
-            this.logger.warn('DeepSeek API key not provided. AI features will be disabled.');
+            this.logger.warn(`${this.provider.toUpperCase()} API key not provided. AI features will be disabled.`);
             this.isEnabled = false;
+        }
+        
+        if (this.isEnabled) {
+            this.logger.info(`AI Service initialized with provider: ${this.provider}`);
+            this.logger.info(`Base URL: ${this.baseURL}`);
+            this.logger.info(`Model: ${this.model}`);
         }
     }
 
@@ -20,24 +65,176 @@ class AIService {
         }
 
         try {
-            const response = await axios.post(`${this.baseURL}/v1/chat/completions`, {
-                model: 'deepseek-chat',
+            // Prepare request payload
+            const payload = {
+                model: this.model,
                 messages: messages,
                 temperature: temperature,
                 max_tokens: maxTokens,
                 stream: false
-            }, {
+            };
+
+            // Prepare headers
+            const headers = {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json'
+            };
+
+            // Make API request
+            const response = await axios.post(`${this.baseURL}/v1/chat/completions`, payload, {
+                headers: headers,
+                timeout: 30000
+            });
+
+            // Extract response
+            if (!response.data || !response.data.choices || !response.data.choices[0]) {
+                throw new Error('Invalid response format from AI provider');
+            }
+
+            return response.data.choices[0].message.content;
+        } catch (error) {
+            this.logger.error(`${this.provider.toUpperCase()} API error:`, error.response?.data || error.message);
+            
+            // More specific error messages based on error type
+            if (error.response?.status === 401) {
+                throw new Error('API key tidak valid. Periksa konfigurasi AI provider.');
+            } else if (error.response?.status === 429) {
+                throw new Error('Rate limit tercapai. Coba lagi dalam beberapa saat.');
+            } else if (error.response?.status >= 500) {
+                throw new Error('Server AI provider sedang mengalami masalah. Coba lagi nanti.');
+            } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+                throw new Error('Tidak dapat terhubung ke AI provider. Periksa URL dan koneksi internet.');
+            } else {
+                throw new Error('Layanan AI sementara tidak tersedia');
+            }
+        }
+    }
+
+    getProviderInfo() {
+        return {
+            provider: this.provider,
+            baseURL: this.baseURL,
+            model: this.model,
+            isEnabled: this.isEnabled
+        };
+    }
+
+    async listAvailableModels() {
+        if (!this.isEnabled) {
+            throw new Error('Fitur AI tidak aktif');
+        }
+
+        try {
+            // Try to get models list from /v1/models endpoint
+            const response = await axios.get(`${this.baseURL}/v1/models`, {
                 headers: {
                     'Authorization': `Bearer ${this.apiKey}`,
                     'Content-Type': 'application/json'
                 },
-                timeout: 30000
+                timeout: 10000
             });
 
-            return response.data.choices[0].message.content;
+            if (response.data && response.data.data) {
+                return {
+                    success: true,
+                    models: response.data.data.map(model => ({
+                        id: model.id,
+                        name: model.id,
+                        created: model.created || null,
+                        owned_by: model.owned_by || 'unknown'
+                    })),
+                    provider: this.provider,
+                    baseURL: this.baseURL
+                };
+            } else {
+                throw new Error('Invalid response format');
+            }
+
         } catch (error) {
-            this.logger.error('DeepSeek API error:', error.response?.data || error.message);
-            throw new Error('Layanan AI sementara tidak tersedia');
+            this.logger.error(`Error listing models for ${this.provider}:`, error.response?.data || error.message);
+            
+            // Return common models based on provider type if API call fails
+            return this.getFallbackModels(error);
+        }
+    }
+
+    getFallbackModels(error) {
+        const fallbackModels = {
+            deepseek: [
+                { id: 'deepseek-chat', name: 'DeepSeek Chat', owned_by: 'deepseek' },
+                { id: 'deepseek-coder', name: 'DeepSeek Coder', owned_by: 'deepseek' }
+            ],
+            openai: [
+                { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', owned_by: 'openai' },
+                { id: 'gpt-3.5-turbo-16k', name: 'GPT-3.5 Turbo 16K', owned_by: 'openai' },
+                { id: 'gpt-4', name: 'GPT-4', owned_by: 'openai' },
+                { id: 'gpt-4-turbo-preview', name: 'GPT-4 Turbo', owned_by: 'openai' }
+            ],
+            groq: [
+                { id: 'llama3-8b-8192', name: 'Llama 3 8B', owned_by: 'meta' },
+                { id: 'llama3-70b-8192', name: 'Llama 3 70B', owned_by: 'meta' },
+                { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', owned_by: 'mistralai' },
+                { id: 'gemma-7b-it', name: 'Gemma 7B IT', owned_by: 'google' }
+            ]
+        };
+
+        // Detect provider type from base URL if provider is openaicompatible
+        let providerKey = this.provider;
+        if (this.provider === 'openaicompatible') {
+            if (this.baseURL.includes('groq.com')) {
+                providerKey = 'groq';
+            } else if (this.baseURL.includes('deepseek.com')) {
+                providerKey = 'deepseek';
+            } else if (this.baseURL.includes('openai.com')) {
+                providerKey = 'openai';
+            }
+        }
+
+        return {
+            success: false,
+            models: fallbackModels[providerKey] || [
+                { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo (fallback)', owned_by: 'unknown' }
+            ],
+            provider: this.provider,
+            baseURL: this.baseURL,
+            error: error.message,
+            note: 'Models list from API failed, showing common models for this provider type'
+        };
+    }
+
+    async testModel(modelName) {
+        if (!this.isEnabled) {
+            throw new Error('Fitur AI tidak aktif');
+        }
+
+        const originalModel = this.model;
+        
+        try {
+            // Temporarily set the model to test
+            this.model = modelName;
+            
+            // Test with a simple request
+            const testResponse = await this.makeRequest([
+                { role: 'user', content: 'Hi, please respond with just "OK" to test this model.' }
+            ], 0.1, 10);
+
+            return {
+                success: true,
+                model: modelName,
+                response: testResponse,
+                provider: this.provider
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                model: modelName,
+                error: error.message,
+                provider: this.provider
+            };
+        } finally {
+            // Restore original model
+            this.model = originalModel;
         }
     }
 
@@ -398,13 +595,168 @@ Teks: "${editText}"`;
     async logInteraction(userPhone, prompt, response, type = 'general') {
         try {
             if (global.bot && global.bot.db) {
-                await global.bot.db.run(
-                    'INSERT INTO ai_interactions (user_phone, prompt, response, type) VALUES (?, ?, ?, ?)',
-                    [userPhone, prompt, response, type]
-                );
+                await global.bot.db.logAIInteraction(userPhone, prompt, response, type);
             }
         } catch (error) {
-            this.logger.error('Error logging AI interaction:', error);
+            this.logger.warn('Warning: Could not log AI interaction:', error.message);
+            // Don't throw error, just log warning to prevent AI functionality from breaking
+        }
+    }
+
+    async generateFinancialAdvice(userContext, balance, spendingAnalysis) {
+        const systemPrompt = `Kamu adalah AI penasihat keuangan personal yang ahli. Berikan saran keuangan yang personal dan actionable dalam bahasa Indonesia berdasarkan data keuangan pengguna.
+
+Analisis yang tersedia:
+- Saldo bersih: ${balance.balance}
+- Total pemasukan: ${balance.income}
+- Total pengeluaran: ${balance.expenses}
+- Pengeluaran harian rata-rata: ${spendingAnalysis.dailyAverage}
+- Total transaksi: ${spendingAnalysis.transactionCount}
+- Rentang waktu analisis: ${spendingAnalysis.timespan} hari
+
+Kategori pengeluaran teratas:
+${Object.entries(spendingAnalysis.categorySpending).map(([cat, amount]) => `- ${cat}: Rp ${amount.toLocaleString()}`).join('\n')}
+
+Berikan saran yang:
+1. Spesifik dan dapat ditindaklanjuti
+2. Berdasarkan pola keuangan yang teridentifikasi
+3. Mencakup tips hemat dan optimisasi pengeluaran
+4. Memberikan target atau goal yang realistis
+5. Disesuaikan dengan kondisi keuangan saat ini
+
+Format respons dengan bullet points yang jelas dan praktis.`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: 'Berikan saran keuangan personal berdasarkan data di atas.' }
+            ], 0.7, 1200);
+
+            return response;
+        } catch (error) {
+            this.logger.error('Error generating financial advice:', error);
+            return 'Maaf, saya tidak dapat memberikan saran keuangan saat ini. Silakan coba lagi nanti.';
+        }
+    }
+
+    async generateFinancialPrediction(historicalTransactions, balance, patterns) {
+        const systemPrompt = `Kamu adalah AI peramal keuangan yang ahli. Berdasarkan data historis transaksi, buatlah prediksi keuangan yang akurat untuk 30 hari ke depan dalam bahasa Indonesia.
+
+Data historis (60 hari terakhir):
+- Total transaksi: ${historicalTransactions.length}
+- Saldo saat ini: ${balance.balance}
+
+Pola yang teridentifikasi:
+${JSON.stringify(patterns, null, 2)}
+
+Berikan prediksi yang mencakup:
+1. Estimasi pemasukan dan pengeluaran bulan depan
+2. Perkiraan saldo akhir bulan
+3. Tren kategori pengeluaran yang akan meningkat/menurun
+4. Rekomendasi berdasarkan prediksi
+5. Level akurasi prediksi dan faktor ketidakpastian
+
+Format dengan struktur yang jelas dan angka spesifik.`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: 'Buatlah prediksi keuangan untuk 30 hari ke depan.' }
+            ], 0.6, 1500);
+
+            return response;
+        } catch (error) {
+            this.logger.error('Error generating financial prediction:', error);
+            return 'Maaf, saya tidak dapat membuat prediksi keuangan saat ini. Silakan coba lagi nanti.';
+        }
+    }
+
+    async generateFinancialSummary(transactions, balance, periodAnalysis, period) {
+        const systemPrompt = `Kamu adalah AI analis keuangan yang membuat ringkasan periode. Buatlah ringkasan yang komprehensif dan insightful untuk periode ${period} dalam bahasa Indonesia.
+
+Data periode:
+- Total transaksi: ${transactions.length}
+- Hari dalam periode: ${periodAnalysis.periodDays}
+- Total pemasukan periode: ${periodAnalysis.totalIncome}
+- Total pengeluaran periode: ${periodAnalysis.totalExpenses}
+- Rata-rata transaksi harian: ${periodAnalysis.averageDaily}
+- Hari paling aktif: ${periodAnalysis.peakDay}
+
+Breakdown kategori:
+${Object.entries(periodAnalysis.categoryBreakdown).map(([cat, amount]) => `- ${cat}: Rp ${amount.toLocaleString()}`).join('\n')}
+
+Buatlah ringkasan yang mencakup:
+1. Highlight utama periode ini
+2. Perbandingan dengan periode sebelumnya (jika memungkinkan)
+3. Tren dan pola yang menarik
+4. Kategori dengan performa terbaik/terburuk
+5. Rekomendasi untuk periode berikutnya
+6. Key takeaways yang actionable
+
+Gunakan tone yang profesional namun mudah dipahami.`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Buatlah ringkasan keuangan ${period} berdasarkan data di atas.` }
+            ], 0.7, 1300);
+
+            return response;
+        } catch (error) {
+            this.logger.error('Error generating financial summary:', error);
+            return `Maaf, saya tidak dapat membuat ringkasan ${period} saat ini. Silakan coba lagi nanti.`;
+        }
+    }
+
+    async suggestCategory(description, type, availableCategories) {
+        const systemPrompt = `Kamu adalah AI ahli kategorisasi transaksi keuangan. Berdasarkan deskripsi transaksi, sarankan kategori yang paling sesuai dari daftar kategori yang tersedia.
+
+Kategori yang tersedia untuk ${type === 'income' ? 'pemasukan' : 'pengeluaran'}:
+${availableCategories.filter(c => c.type === type).map(c => `- ${c.name} (ID: ${c.id})`).join('\n')}
+
+Kembalikan HANYA objek JSON dengan format:
+{
+  "category": {
+    "id": number,
+    "name": string
+  },
+  "confidence": number (0-1),
+  "reasoning": string (alasan singkat pemilihan kategori)
+}
+
+Jika tidak yakin atau tidak ada kategori yang cocok, return confidence < 0.7.
+
+Deskripsi transaksi: "${description}"
+Jenis: ${type === 'income' ? 'Pemasukan' : 'Pengeluaran'}`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Kategorikan transaksi: ${description}` }
+            ], 0.3, 300);
+
+            const cleanResponse = response.replace(/```json\s*|\s*```/g, '').trim();
+            const parsed = JSON.parse(cleanResponse);
+            
+            // Validate response structure
+            if (!parsed.category || !parsed.category.id || !parsed.category.name || parsed.confidence === undefined) {
+                throw new Error('Invalid response structure');
+            }
+
+            // Verify the suggested category exists in available categories
+            const categoryExists = availableCategories.find(c => c.id === parsed.category.id);
+            if (!categoryExists) {
+                throw new Error('Suggested category not in available list');
+            }
+
+            return parsed;
+        } catch (error) {
+            this.logger.error('Error suggesting category:', error);
+            return {
+                category: null,
+                confidence: 0,
+                reasoning: "Tidak dapat menentukan kategori yang sesuai"
+            };
         }
     }
 

@@ -1,8 +1,19 @@
-# WhatsApp Financial Management Bot
+# WhatsApp Financial Management Bot with Indonesian AI Assistant
 
-A comprehensive WhatsApp bot for managing personal finances with AI-powered insights using DeepSeek API. Track income, expenses, debts, and get intelligent financial analysis through simple WhatsApp commands.
+A comprehensive WhatsApp bot for managing personal finances with AI-powered insights using DeepSeek API. Features intelligent user registration, subscription management, and advanced financial analysis through simple WhatsApp commands - all in Indonesian language.
+
+> 🚀 **MIGRATED TO BAILEYS**: This bot now uses [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys) for better performance, stability, and multi-device support. See [BAILEYS_MIGRATION.md](BAILEYS_MIGRATION.md) for details.
 
 ## 🌟 Features
+
+### 🇮🇩 Indonesian AI Assistant (NEW!)
+- 🤖 **Intelligent User Registration** - Multi-step registration flow with validation
+- 👤 **User Authentication** - Secure user management and session handling
+- 💎 **Subscription Management** - Free vs Premium plans with transaction limits
+- 🔐 **Access Control** - Plan-based feature restrictions and quota management
+- 📊 **Usage Tracking** - Real-time transaction limit monitoring
+- 🎯 **Personalized Experience** - Time-based greetings and contextual responses
+- 🌐 **Indonesian Language** - Complete Indonesian language support
 
 ### Core Financial Management
 - ✅ **Income & Expense Tracking** - Simple commands to record transactions
@@ -55,9 +66,11 @@ cp .env.example .env
 # Edit .env with your settings
 ```
 
-4. **Setup and start**
+4. **Setup database and start**
 ```bash
 npm run setup
+# For existing databases, run migration for Indonesian AI Assistant
+node scripts/migrate-registration.js
 npm start
 ```
 
@@ -91,13 +104,33 @@ Buat file `.env` atau set di platform deployment:
 ```env
 DEEPSEEK_API_KEY=your_api_key_here
 BOT_ADMIN_PHONE=+62xxxxxxxxxx
-ALLOWED_USERS=+62xxxxxxxxxx,+62yyyyyyyyyy
+USER_ADMIN=+62xxxxxxxxxx
+
+# Note: ALLOWED_USERS tidak diperlukan lagi -
+# Semua user dapat register otomatis melalui Indonesian AI Assistant
+# USER_ADMIN menentukan siapa yang memiliki akses admin
 ```
 
-### Scan QR Code
-- QR code akan muncul di terminal/logs
-- Scan dengan WhatsApp untuk connect
-- Kirim `/help` untuk melihat commands
+### Subscription Plans
+- **Free Plan**: 10 transaksi/bulan, fitur dasar
+- **Premium Plan**: Unlimited transaksi, fitur lengkap (Rp 50.000/bulan)
+
+### User Registration & First Time Setup
+1. **Scan QR Code**
+   - QR code akan muncul di terminal/logs
+   - Scan dengan WhatsApp untuk connect
+
+2. **User Registration (Indonesian AI Assistant)**
+   - Kirim pesan apa saja untuk memulai registrasi
+   - Bot akan memandu proses registrasi 3 langkah:
+     - Nama lengkap
+     - Alamat email
+     - Kota asal
+   - Otomatis mendapat Free Plan (10 transaksi/bulan)
+
+3. **Start Using**
+   - Kirim `/menu` untuk melihat semua fitur
+   - Gunakan bahasa natural: "saya habis 50000 untuk makan siang"
 
 ## ⚙️ Configuration
 
@@ -299,6 +332,7 @@ this.commands['/newcommand'] = this.handleNewCommand.bind(this);
 
 ## 📚 Documentation
 
+- [🇮🇩 Indonesian AI Assistant](INDONESIAN_AI_ASSISTANT.md) - Complete guide to registration & subscription system
 - [📖 User Manual](docs/USER_MANUAL.md) - Detailed user guide
 - [🚀 Deployment Guide](docs/DEPLOYMENT.md) - Production deployment
 - [🔌 API Reference](docs/API.md) - API documentation
@@ -370,7 +404,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js) - WhatsApp Web API
+- [Baileys](https://github.com/WhiskeySockets/Baileys) - WhatsApp Web API (Multi-Device)
 - [DeepSeek](https://deepseek.com/) - AI API for intelligent features
 - [SQLite](https://sqlite.org/) - Lightweight database
 - [Node.js](https://nodejs.org/) - Runtime environment

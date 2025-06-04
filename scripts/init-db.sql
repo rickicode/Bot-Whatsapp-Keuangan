@@ -160,4 +160,15 @@ CREATE TRIGGER update_debts_updated_at BEFORE UPDATE ON debts
 CREATE TRIGGER update_settings_updated_at BEFORE UPDATE ON settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- Create WhatsApp sessions table
+CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+    client_id VARCHAR(100) PRIMARY KEY,
+    session_data TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create index for faster session lookups
+CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_updated ON whatsapp_sessions(updated_at);
+
 -- Completed PostgreSQL initialization

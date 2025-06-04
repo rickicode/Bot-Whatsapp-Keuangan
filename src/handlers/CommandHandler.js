@@ -90,17 +90,26 @@ class CommandHandler {
             '/help-ai': this.handleAIHelp.bind(this),
             '/contoh': this.handleExamples.bind(this),
             '/examples': this.handleExamples.bind(this),
-            '/menu': this.handleMainMenu.bind(this)
+            '/menu': this.handleMainMenu.bind(this),
+            '/menu-admin': this.handleAdminMenu.bind(this),
+            '/admin': this.handleAdminMenu.bind(this),
+            '/change-plan': this.handleChangePlan.bind(this),
+            '/suspend-user': this.handleSuspendUser.bind(this),
+            '/user-list': this.handleUserList.bind(this),
+            '/reset-limit': this.handleResetLimit.bind(this),
+            '/user-detail': this.handleUserDetail.bind(this),
+            '/ai-info': this.handleAIInfo.bind(this)
         };
     }
 
     async handleMessage(message) {
         try {
-            const userPhone = message.from.replace('@c.us', '');
+            // Handle both whatsapp-web.js and Baileys format
+            const userPhone = message.from.replace(/@c\.us|@s\.whatsapp\.net/g, '');
             const text = message.body.trim();
             
-            // Ensure user exists in database
-            await this.db.createUser(userPhone);
+            // Note: User registration and authentication is now handled by IndonesianAIAssistant
+            // We assume user is already registered and authenticated when reaching this point
             
             // Check if user has pending transaction confirmation
             if (await this.handlePendingTransaction(message, userPhone, text)) {
@@ -148,6 +157,11 @@ class CommandHandler {
 
     async handleNaturalLanguage(message, userPhone, text) {
         try {
+            // Check for auto categorization apply command
+            if (await this.handleAutoCategorizationApply(message, userPhone, text)) {
+                return;
+            }
+            
             // First check if this might be an edit instruction
             if (await this.handleNaturalLanguageEdit(message, userPhone, text)) {
                 return;
@@ -156,6 +170,22 @@ class CommandHandler {
             const parsed = await this.ai.parseNaturalLanguageTransaction(text, userPhone);
             
             if (parsed && parsed.confidence > 0.7) {
+                // Check transaction limit before processing
+                const limitCheck = await this.db.checkTransactionLimit(userPhone);
+                if (!limitCheck.allowed) {
+                    if (limitCheck.reason === 'Daily limit reached') {
+                        await message.reply(
+                            `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                            '⏰ Kuota akan direset besok pagi.\n' +
+                            '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                            "Ketik 'upgrade' untuk info lebih lanjut!"
+                        );
+                    } else {
+                        await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+                    }
+                    return;
+                }
+
                 // Check if category is unknown or needs confirmation
                 if (parsed.category === 'unknown' || !parsed.category) {
                     await this.askForCategory(message, userPhone, parsed);
@@ -163,27 +193,50 @@ class CommandHandler {
                 }
 
                 // Auto-process high confidence transactions with known category
+                this.logger.info(`Getting categories for user ${userPhone}, type: ${parsed.type}`);
                 const categories = await this.db.getCategories(userPhone, parsed.type);
+                this.logger.info(`Found ${categories.length} categories for ${parsed.type}:`, categories.map(c => `${c.name} (id: ${c.id})`));
+                
                 const category = categories.find(c =>
                     c.name.toLowerCase() === parsed.category.toLowerCase() ||
                     c.name.toLowerCase().includes(parsed.category.toLowerCase()) ||
                     parsed.category.toLowerCase().includes(c.name.toLowerCase())
                 ) || categories[0];
                 
+                this.logger.info(`Selected category for "${parsed.category}":`, category);
+                
+                if (!category) {
+                    this.logger.error(`No category found for type ${parsed.type}. Available categories:`, categories);
+                    await this.askForCategory(message, userPhone, parsed);
+                    return;
+                }
+                
+                this.logger.info(`Adding transaction with category_id: ${category.id}`);
                 const transactionId = await this.db.addTransaction(
                     userPhone,
                     parsed.type,
                     parsed.amount,
-                    category?.id,
+                    category.id,
                     parsed.description
                 );
+                this.logger.info(`Transaction added with ID: ${transactionId}`);
+                
+                // Increment transaction count for limited plans
+                if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                    await this.db.incrementTransactionCount(userPhone);
+                }
+                
+                const remaining = limitCheck.subscription.monthly_transaction_limit
+                    ? limitCheck.remaining - 1
+                    : '∞';
                 
                 const response = `✅ Transaksi berhasil ditambahkan!\n\n` +
                     `💰 ${parsed.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}: ${this.formatCurrency(parsed.amount)}\n` +
                     `📝 Deskripsi: ${parsed.description}\n` +
                     `🏷️ Kategori: ${category?.name || 'Lainnya'}\n` +
                     `🆔 ID: ${transactionId}\n\n` +
-                    `Tingkat Keyakinan AI: ${Math.round(parsed.confidence * 100)}%`;
+                    `🤖 Tingkat Keyakinan AI: ${Math.round(parsed.confidence * 100)}%\n` +
+                    `📊 Sisa kuota: ${remaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}`;
                 
                 await message.reply(response);
             } else if (parsed && parsed.confidence > 0.4) {
@@ -223,18 +276,44 @@ class CommandHandler {
             return;
         }
 
+        // Check transaction limit before processing
+        const limitCheck = await this.db.checkTransactionLimit(userPhone);
+        if (!limitCheck.allowed) {
+            if (limitCheck.reason === 'Daily limit reached') {
+                await message.reply(
+                    `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                    '⏰ Kuota akan direset besok pagi.\n' +
+                    '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                    "Ketik 'upgrade' untuk info lebih lanjut!"
+                );
+            } else {
+                await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+            }
+            return;
+        }
+
         const description = args.slice(1, -1).join(' ') || args.slice(1).join(' ');
         const categoryName = args.length > 2 ? args[args.length - 1] : null;
 
         try {
             const result = await this.transactionService.addIncome(userPhone, amount, description, categoryName);
             
+            // Increment transaction count for limited plans
+            if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                await this.db.incrementTransactionCount(userPhone);
+            }
+            
+            const remaining = limitCheck.subscription.monthly_transaction_limit
+                ? limitCheck.remaining - 1
+                : '∞';
+            
             const response = `✅ Pemasukan berhasil ditambahkan!\n\n` +
                 `💰 Jumlah: ${this.formatCurrency(amount)}\n` +
                 `📝 Deskripsi: ${description}\n` +
                 `🏷️ Kategori: ${result.categoryName}\n` +
                 `🆔 ID Transaksi: ${result.transactionId}\n` +
-                `📅 Tanggal: ${moment().format('DD/MM/YYYY')}`;
+                `📅 Tanggal: ${moment().format('DD/MM/YYYY')}\n\n` +
+                `📊 Sisa kuota: ${remaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}`;
             
             await message.reply(response);
         } catch (error) {
@@ -255,18 +334,44 @@ class CommandHandler {
             return;
         }
 
+        // Check transaction limit before processing
+        const limitCheck = await this.db.checkTransactionLimit(userPhone);
+        if (!limitCheck.allowed) {
+            if (limitCheck.reason === 'Daily limit reached') {
+                await message.reply(
+                    `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                    '⏰ Kuota akan direset besok pagi.\n' +
+                    '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                    "Ketik 'upgrade' untuk info lebih lanjut!"
+                );
+            } else {
+                await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+            }
+            return;
+        }
+
         const description = args.slice(1, -1).join(' ') || args.slice(1).join(' ');
         const categoryName = args.length > 2 ? args[args.length - 1] : null;
 
         try {
             const result = await this.transactionService.addExpense(userPhone, amount, description, categoryName);
             
+            // Increment transaction count for limited plans
+            if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                await this.db.incrementTransactionCount(userPhone);
+            }
+            
+            const remaining = limitCheck.subscription.monthly_transaction_limit
+                ? limitCheck.remaining - 1
+                : '∞';
+            
             const response = `✅ Pengeluaran berhasil ditambahkan!\n\n` +
                 `💸 Jumlah: ${this.formatCurrency(amount)}\n` +
                 `📝 Deskripsi: ${description}\n` +
                 `🏷️ Kategori: ${result.categoryName}\n` +
                 `🆔 ID Transaksi: ${result.transactionId}\n` +
-                `📅 Tanggal: ${moment().format('DD/MM/YYYY')}`;
+                `📅 Tanggal: ${moment().format('DD/MM/YYYY')}\n\n` +
+                `📊 Sisa kuota: ${remaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}`;
             
             await message.reply(response);
         } catch (error) {
@@ -305,12 +410,166 @@ class CommandHandler {
     // Report handling
     async handleReport(message, userPhone, args) {
         try {
+            // Check if first argument is "tanggal"
+            if (args[0] && args[0].toLowerCase() === 'tanggal') {
+                await this.handleDateReport(message, userPhone, args.slice(1));
+                return;
+            }
+            
             const period = args[0] || 'bulanan';
             const report = await this.reportService.generateReport(userPhone, period);
             
             await message.reply(report);
         } catch (error) {
             await message.reply('❌ Gagal membuat laporan: ' + error.message);
+        }
+    }
+
+    // Date-specific report handling
+    async handleDateReport(message, userPhone, args) {
+        try {
+            if (args.length === 0) {
+                await message.reply(
+                    '📅 Cara pakai: /laporan tanggal [DD/MM/YYYY]\n\n' +
+                    'Contoh:\n' +
+                    '• /laporan tanggal 07/06/2025\n' +
+                    '• /laporan tanggal 15/05/2025\n' +
+                    '• /laporan tanggal hari ini (untuk hari ini)\n\n' +
+                    '💡 Format tanggal: DD/MM/YYYY'
+                );
+                return;
+            }
+
+            let targetDate;
+            const dateInput = args.join(' ').toLowerCase();
+
+            // Handle "hari ini" or "today"
+            if (dateInput === 'hari ini' || dateInput === 'today') {
+                targetDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+            } else {
+                // Parse date from DD/MM/YYYY format
+                targetDate = this.parseDateToISO(args[0]);
+                if (!targetDate) {
+                    await message.reply(
+                        '❌ Format tanggal tidak valid!\n\n' +
+                        '📅 Gunakan format: DD/MM/YYYY\n' +
+                        'Contoh: 07/06/2025\n\n' +
+                        'Atau ketik "hari ini" untuk laporan hari ini.'
+                    );
+                    return;
+                }
+            }
+
+            // Get transactions for the specific date
+            const transactions = await this.db.getTransactionsByDate(userPhone, targetDate);
+            const balance = await this.db.getBalanceByDate(userPhone, targetDate);
+
+            // Format the date for display
+            const displayDate = this.formatDate(targetDate);
+            
+            if (transactions.length === 0) {
+                await message.reply(
+                    `📅 *Laporan Tanggal ${displayDate}*\n\n` +
+                    '📊 Tidak ada transaksi pada tanggal ini.\n\n' +
+                    '💡 Coba tanggal lain atau gunakan /saldo untuk melihat transaksi terbaru.'
+                );
+                return;
+            }
+
+            // Generate report
+            let response = `📅 *Laporan Keuangan - ${displayDate}*\n\n`;
+            
+            // Summary section
+            response += `💰 *RINGKASAN HARI INI:*\n`;
+            response += `📈 Total Pemasukan: ${this.formatCurrency(balance.income)}\n`;
+            response += `📉 Total Pengeluaran: ${this.formatCurrency(balance.expenses)}\n`;
+            response += `💵 Selisih: ${this.formatCurrency(balance.balance)}\n`;
+            response += `🔢 Total Transaksi: ${transactions.length}\n\n`;
+
+            // Transactions by category
+            const incomeTransactions = transactions.filter(t => t.type === 'income');
+            const expenseTransactions = transactions.filter(t => t.type === 'expense');
+
+            if (incomeTransactions.length > 0) {
+                response += `📈 *PEMASUKAN (${incomeTransactions.length}):*\n`;
+                incomeTransactions.forEach((t, index) => {
+                    response += `${index + 1}. ${this.formatCurrency(t.amount)} - ${t.description}\n`;
+                    response += `   🏷️ ${t.category_name || 'Lainnya'} | 🆔 ${t.id}\n`;
+                });
+                response += '\n';
+            }
+
+            if (expenseTransactions.length > 0) {
+                response += `📉 *PENGELUARAN (${expenseTransactions.length}):*\n`;
+                expenseTransactions.forEach((t, index) => {
+                    response += `${index + 1}. ${this.formatCurrency(t.amount)} - ${t.description}\n`;
+                    response += `   🏷️ ${t.category_name || 'Lainnya'} | 🆔 ${t.id}\n`;
+                });
+                response += '\n';
+            }
+
+            // Category breakdown for expenses
+            if (expenseTransactions.length > 0) {
+                const categoryTotals = {};
+                expenseTransactions.forEach(t => {
+                    const categoryName = t.category_name || 'Lainnya';
+                    categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + parseFloat(t.amount);
+                });
+
+                response += `🏷️ *PENGELUARAN PER KATEGORI:*\n`;
+                Object.entries(categoryTotals)
+                    .sort((a, b) => b[1] - a[1]) // Sort by amount descending
+                    .forEach(([category, total]) => {
+                        const percentage = ((total / balance.expenses) * 100).toFixed(1);
+                        response += `• ${category}: ${this.formatCurrency(total)} (${percentage}%)\n`;
+                    });
+                response += '\n';
+            }
+
+            // Tips and actions
+            response += `💡 *AKSI CEPAT:*\n`;
+            response += `• /edit [ID] - Edit transaksi\n`;
+            response += `• /hapus [ID] - Hapus transaksi\n`;
+            response += `• /saldo - Lihat saldo keseluruhan\n`;
+            response += `• /laporan bulanan - Laporan bulan ini`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error generating date report:', error);
+            await message.reply('❌ Gagal membuat laporan tanggal: ' + error.message);
+        }
+    }
+
+    // Helper method to parse DD/MM/YYYY to YYYY-MM-DD
+    parseDateToISO(dateString) {
+        try {
+            // Handle DD/MM/YYYY format
+            const parts = dateString.split('/');
+            if (parts.length !== 3) {
+                return null;
+            }
+
+            const day = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10);
+            const year = parseInt(parts[2], 10);
+
+            // Validate ranges
+            if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1900 || year > 2100) {
+                return null;
+            }
+
+            // Create date and validate it
+            const date = new Date(year, month - 1, day);
+            if (date.getDate() !== day || date.getMonth() !== month - 1 || date.getFullYear() !== year) {
+                return null;
+            }
+
+            // Return in YYYY-MM-DD format
+            return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+
+        } catch (error) {
+            return null;
         }
     }
 
@@ -434,6 +693,7 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 
 • /saldo - Saldo & transaksi terbaru (dengan ID)
 • /laporan [periode] - Laporan harian/mingguan/bulanan
+• /laporan tanggal [DD/MM/YYYY] - Laporan tanggal spesifik
 • /kategori - Lihat semua kategori
 
 🔍 *CARI & EDIT:*
@@ -470,6 +730,9 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 • /chat [pertanyaan] - Konsultasi keuangan
 • /analisis - Analisis pola keuangan AI
 • /saran - Saran keuangan personal
+• /prediksi-ai - Prediksi keuangan masa depan
+• /ringkasan-ai [periode] - Ringkasan AI (harian/mingguan/bulanan)
+• /kategori-otomatis - Auto kategorisasi transaksi dengan AI
 
 💡 *BAHASA NATURAL (FITUR UNGGULAN):*
 
@@ -583,6 +846,8 @@ Bot akan tampilkan menu kategori untuk dipilih!
 /laporan harian
 /laporan mingguan
 /laporan bulanan
+/laporan tanggal 07/06/2025
+/laporan tanggal hari ini
 /analisis
 /chat Bagaimana pengeluaran saya bulan ini?
 \`\`\`
@@ -682,6 +947,23 @@ Bot akan tampilkan menu kategori untuk dipilih!
             }
 
             if (selectedCategory) {
+                // Check transaction limit before processing
+                const limitCheck = await this.db.checkTransactionLimit(userPhone);
+                if (!limitCheck.allowed) {
+                    if (limitCheck.reason === 'Daily limit reached') {
+                        await message.reply(
+                            `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                            '⏰ Kuota akan direset besok pagi.\n' +
+                            '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                            "Ketik 'upgrade' untuk info lebih lanjut!"
+                        );
+                    } else {
+                        await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+                    }
+                    global.pendingTransactions.delete(userPhone);
+                    return true;
+                }
+
                 // Add the transaction with selected category
                 const transactionId = await this.db.addTransaction(
                     userPhone,
@@ -691,11 +973,21 @@ Bot akan tampilkan menu kategori untuk dipilih!
                     pending.description
                 );
 
+                // Increment transaction count for limited plans
+                if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                    await this.db.incrementTransactionCount(userPhone);
+                }
+                
+                const remaining = limitCheck.subscription.monthly_transaction_limit
+                    ? limitCheck.remaining - 1
+                    : '∞';
+
                 const response = `✅ Transaksi berhasil ditambahkan!\n\n` +
                     `💰 ${pending.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}: ${this.formatCurrency(pending.amount)}\n` +
                     `📝 Deskripsi: ${pending.description}\n` +
                     `🏷️ Kategori: ${selectedCategory.name}\n` +
-                    `🆔 ID: ${transactionId}`;
+                    `🆔 ID: ${transactionId}\n\n` +
+                    `📊 Sisa kuota: ${remaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}`;
 
                 await message.reply(response);
                 global.pendingTransactions.delete(userPhone);
@@ -712,6 +1004,109 @@ Bot akan tampilkan menu kategori untuk dipilih!
             }
             return true;
         }
+    }
+
+    async handleAutoCategorizationApply(message, userPhone, text) {
+        const lowerText = text.toLowerCase().trim();
+        
+        // Check if user wants to apply auto categorization suggestions
+        if (lowerText === 'apply auto' || lowerText === 'terapkan auto' || lowerText === 'apply all') {
+            try {
+                if (!global.autoCategorizationSuggestions || !global.autoCategorizationSuggestions.has(userPhone)) {
+                    await message.reply('❌ Tidak ada saran kategorisasi yang tersimpan. Gunakan /kategori-otomatis terlebih dahulu.');
+                    return true;
+                }
+
+                const stored = global.autoCategorizationSuggestions.get(userPhone);
+                
+                // Check if suggestions are too old (10 minutes)
+                if (Date.now() - stored.timestamp > 600000) {
+                    global.autoCategorizationSuggestions.delete(userPhone);
+                    await message.reply('⏰ Saran kategorisasi sudah kadaluarsa. Gunakan /kategori-otomatis untuk saran baru.');
+                    return true;
+                }
+
+                const suggestions = stored.suggestions;
+                
+                if (suggestions.length === 0) {
+                    await message.reply('ℹ️ Tidak ada saran dengan keyakinan >90% untuk diterapkan secara otomatis.');
+                    return true;
+                }
+
+                await message.reply(`🤖 Menerapkan ${suggestions.length} saran kategorisasi dengan keyakinan tinggi...`);
+
+                let successCount = 0;
+                let failCount = 0;
+                const results = [];
+
+                // Apply each suggestion
+                for (const suggestion of suggestions) {
+                    try {
+                        await this.transactionService.updateTransaction(
+                            userPhone,
+                            suggestion.transaction.id,
+                            { category_id: suggestion.suggested.category.id }
+                        );
+                        
+                        results.push({
+                            id: suggestion.transaction.id,
+                            description: suggestion.transaction.description,
+                            oldCategory: suggestion.current,
+                            newCategory: suggestion.suggested.category.name,
+                            success: true
+                        });
+                        successCount++;
+                    } catch (error) {
+                        this.logger.error(`Failed to update transaction ${suggestion.transaction.id}:`, error);
+                        results.push({
+                            id: suggestion.transaction.id,
+                            description: suggestion.transaction.description,
+                            success: false,
+                            error: error.message
+                        });
+                        failCount++;
+                    }
+                }
+
+                // Generate response
+                let response = `✅ *Auto Kategorisasi Selesai!*\n\n`;
+                response += `📊 **Hasil:**\n`;
+                response += `✅ Berhasil: ${successCount}\n`;
+                response += `❌ Gagal: ${failCount}\n\n`;
+
+                if (successCount > 0) {
+                    response += `🏷️ **Perubahan yang Diterapkan:**\n`;
+                    results.filter(r => r.success).forEach((result, index) => {
+                        response += `${index + 1}. ${result.description}\n`;
+                        response += `   🔄 ${result.oldCategory} → **${result.newCategory}**\n`;
+                    });
+                    response += '\n';
+                }
+
+                if (failCount > 0) {
+                    response += `⚠️ **Gagal Diproses:**\n`;
+                    results.filter(r => !r.success).forEach((result, index) => {
+                        response += `${index + 1}. ID ${result.id} - ${result.description}\n`;
+                    });
+                    response += '\n';
+                }
+
+                response += `💡 **Tips:** Gunakan /saldo atau /laporan untuk melihat hasil perubahan.`;
+
+                await message.reply(response);
+                
+                // Clean up suggestions
+                global.autoCategorizationSuggestions.delete(userPhone);
+                return true;
+
+            } catch (error) {
+                this.logger.error('Error applying auto categorization:', error);
+                await message.reply('❌ Gagal menerapkan kategorisasi otomatis: ' + error.message);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     async handleNaturalLanguageEdit(message, userPhone, text) {
@@ -1130,6 +1525,195 @@ Bot akan tampilkan menu kategori untuk dipilih!
         return null;
     }
 
+    // Helper methods for AI features
+    analyzeSpendingPatterns(transactions, balance) {
+        const expenses = transactions.filter(t => t.type === 'expense');
+        const income = transactions.filter(t => t.type === 'income');
+        
+        // Calculate category spending
+        const categorySpending = {};
+        expenses.forEach(t => {
+            const category = t.category_name || 'Lainnya';
+            categorySpending[category] = (categorySpending[category] || 0) + parseFloat(t.amount);
+        });
+
+        // Calculate daily average
+        const days = Math.max(1, Math.ceil((Date.now() - new Date(transactions[transactions.length - 1]?.date || Date.now())) / (24 * 60 * 60 * 1000)));
+        const dailyAverage = expenses.reduce((sum, t) => sum + parseFloat(t.amount), 0) / days;
+
+        // Find largest expenses
+        const largestExpenses = expenses
+            .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount))
+            .slice(0, 5);
+
+        return {
+            categorySpending,
+            dailyAverage,
+            largestExpenses,
+            totalExpenses: expenses.reduce((sum, t) => sum + parseFloat(t.amount), 0),
+            totalIncome: income.reduce((sum, t) => sum + parseFloat(t.amount), 0),
+            transactionCount: transactions.length,
+            timespan: days
+        };
+    }
+
+    analyzePredictionPatterns(transactions) {
+        const weeklyData = {};
+        const monthlyData = {};
+        const categoryTrends = {};
+
+        transactions.forEach(t => {
+            const date = new Date(t.date);
+            const week = this.getWeekKey(date);
+            const month = this.getMonthKey(date);
+            const category = t.category_name || 'Lainnya';
+
+            // Weekly patterns
+            if (!weeklyData[week]) weeklyData[week] = { income: 0, expenses: 0 };
+            if (t.type === 'income') weeklyData[week].income += parseFloat(t.amount);
+            else weeklyData[week].expenses += parseFloat(t.amount);
+
+            // Monthly patterns
+            if (!monthlyData[month]) monthlyData[month] = { income: 0, expenses: 0 };
+            if (t.type === 'income') monthlyData[month].income += parseFloat(t.amount);
+            else monthlyData[month].expenses += parseFloat(t.amount);
+
+            // Category trends
+            if (!categoryTrends[category]) categoryTrends[category] = [];
+            categoryTrends[category].push({
+                amount: parseFloat(t.amount),
+                date: t.date,
+                type: t.type
+            });
+        });
+
+        return {
+            weeklyData,
+            monthlyData,
+            categoryTrends,
+            totalTransactions: transactions.length
+        };
+    }
+
+    calculateWeeklyAverage(transactions) {
+        const weeks = {};
+        transactions.forEach(t => {
+            const week = this.getWeekKey(new Date(t.date));
+            if (!weeks[week]) weeks[week] = { income: 0, expenses: 0 };
+            
+            if (t.type === 'income') weeks[week].income += parseFloat(t.amount);
+            else weeks[week].expenses += parseFloat(t.amount);
+        });
+
+        const weekCount = Object.keys(weeks).length || 1;
+        const totalIncome = Object.values(weeks).reduce((sum, w) => sum + w.income, 0);
+        const totalExpenses = Object.values(weeks).reduce((sum, w) => sum + w.expenses, 0);
+
+        return {
+            income: totalIncome / weekCount,
+            expenses: totalExpenses / weekCount
+        };
+    }
+
+    calculateMonthlyTrend(transactions) {
+        const months = {};
+        transactions.forEach(t => {
+            const month = this.getMonthKey(new Date(t.date));
+            if (!months[month]) months[month] = { income: 0, expenses: 0, net: 0 };
+            
+            if (t.type === 'income') {
+                months[month].income += parseFloat(t.amount);
+                months[month].net += parseFloat(t.amount);
+            } else {
+                months[month].expenses += parseFloat(t.amount);
+                months[month].net -= parseFloat(t.amount);
+            }
+        });
+
+        const monthKeys = Object.keys(months).sort();
+        if (monthKeys.length < 2) {
+            return { direction: 'stabil', percentage: 0 };
+        }
+
+        const firstMonth = months[monthKeys[0]].net;
+        const lastMonth = months[monthKeys[monthKeys.length - 1]].net;
+        
+        const change = ((lastMonth - firstMonth) / Math.abs(firstMonth || 1)) * 100;
+        
+        return {
+            direction: change > 5 ? 'naik' : change < -5 ? 'turun' : 'stabil',
+            percentage: change
+        };
+    }
+
+    analyzePeriodData(transactions, startDate, endDate) {
+        const days = Math.ceil((new Date(endDate) - new Date(startDate)) / (24 * 60 * 60 * 1000)) + 1;
+        
+        const income = transactions.filter(t => t.type === 'income');
+        const expenses = transactions.filter(t => t.type === 'expense');
+        
+        const categoryBreakdown = {};
+        expenses.forEach(t => {
+            const category = t.category_name || 'Lainnya';
+            categoryBreakdown[category] = (categoryBreakdown[category] || 0) + parseFloat(t.amount);
+        });
+
+        const dailyTransactions = {};
+        transactions.forEach(t => {
+            const date = t.date;
+            dailyTransactions[date] = (dailyTransactions[date] || 0) + 1;
+        });
+
+        return {
+            periodDays: days,
+            totalIncome: income.reduce((sum, t) => sum + parseFloat(t.amount), 0),
+            totalExpenses: expenses.reduce((sum, t) => sum + parseFloat(t.amount), 0),
+            categoryBreakdown,
+            dailyTransactions,
+            averageDaily: transactions.length / days,
+            peakDay: Object.keys(dailyTransactions).reduce((a, b) => dailyTransactions[a] > dailyTransactions[b] ? a : b, Object.keys(dailyTransactions)[0])
+        };
+    }
+
+    getPeriodName(period) {
+        switch (period.toLowerCase()) {
+            case 'harian':
+            case 'daily':
+                return 'Hari Ini';
+            case 'mingguan':
+            case 'weekly':
+                return 'Minggu Ini';
+            case 'bulanan':
+            case 'monthly':
+            default:
+                return 'Bulan Ini';
+        }
+    }
+
+    getTopExpenseCategories(expenses) {
+        const categories = {};
+        expenses.forEach(t => {
+            const category = t.category_name || 'Lainnya';
+            categories[category] = (categories[category] || 0) + parseFloat(t.amount);
+        });
+
+        return Object.entries(categories)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map((entry, index) => `${index + 1}. ${entry[0]}: ${this.formatCurrency(entry[1])}`)
+            .join('\n');
+    }
+
+    getWeekKey(date) {
+        const year = date.getFullYear();
+        const week = Math.ceil(((date - new Date(year, 0, 1)) / 86400000 + new Date(year, 0, 1).getDay() + 1) / 7);
+        return `${year}-W${week}`;
+    }
+
+    getMonthKey(date) {
+        return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+    }
+
     // Placeholder methods for other commands
     async handleDebt(message, userPhone, args) {
         await message.reply('🚧 Fitur manajemen hutang akan segera hadir!');
@@ -1152,7 +1736,43 @@ Bot akan tampilkan menu kategori untuk dipilih!
             await message.reply('❌ Fitur AI tidak tersedia.');
             return;
         }
-        await message.reply('🚧 Fitur saran AI akan segera hadir!');
+
+        try {
+            await message.reply('🤖 Menganalisis data keuangan Anda untuk memberikan saran...');
+
+            // Get user's financial context
+            const userContext = await this.reportService.getUserContext(userPhone);
+            const balance = await this.db.getBalance(userPhone);
+            const recentTransactions = await this.db.getTransactions(userPhone, 20);
+
+            // Get spending patterns for last 30 days
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const startDate = thirtyDaysAgo.toISOString().split('T')[0];
+            const endDate = new Date().toISOString().split('T')[0];
+            
+            const monthlyTransactions = await this.db.getTransactionsByDateRange(userPhone, startDate, endDate);
+
+            // Analyze spending patterns
+            const spendingAnalysis = this.analyzeSpendingPatterns(monthlyTransactions, balance);
+
+            // Generate AI advice
+            const advice = await this.ai.generateFinancialAdvice(userContext, balance, spendingAnalysis);
+
+            const response = `💡 *Saran Keuangan Personal*\n\n` +
+                `📊 *Ringkasan Keuangan:*\n` +
+                `💰 Saldo Bersih: ${this.formatCurrency(balance.balance)}\n` +
+                `📈 Total Pemasukan: ${this.formatCurrency(balance.income)}\n` +
+                `📉 Total Pengeluaran: ${this.formatCurrency(balance.expenses)}\n\n` +
+                `🤖 *Saran AI:*\n${advice}\n\n` +
+                `💡 *Tips:* Gunakan /analisis untuk analisis mendalam atau /chat untuk konsultasi lebih lanjut.`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error generating advice:', error);
+            await message.reply('❌ Gagal membuat saran: ' + error.message);
+        }
     }
 
     async handleAIPrediction(message, userPhone, args) {
@@ -1160,7 +1780,53 @@ Bot akan tampilkan menu kategori untuk dipilih!
             await message.reply('❌ Fitur AI tidak tersedia.');
             return;
         }
-        await message.reply('🚧 Fitur prediksi AI akan segera hadir!');
+
+        try {
+            await message.reply('🔮 Menganalisis pola transaksi untuk prediksi keuangan...');
+
+            // Get historical data for prediction
+            const sixtyDaysAgo = new Date();
+            sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+            const startDate = sixtyDaysAgo.toISOString().split('T')[0];
+            const endDate = new Date().toISOString().split('T')[0];
+            
+            const historicalTransactions = await this.db.getTransactionsByDateRange(userPhone, startDate, endDate);
+            const balance = await this.db.getBalance(userPhone);
+
+            if (historicalTransactions.length < 10) {
+                await message.reply(
+                    '📊 *Prediksi AI*\n\n' +
+                    '⚠️ Data transaksi belum cukup untuk membuat prediksi yang akurat.\n\n' +
+                    '💡 *Saran:* Lakukan minimal 10 transaksi dalam 60 hari terakhir untuk mendapatkan prediksi yang lebih baik.\n\n' +
+                    `📈 Transaksi saat ini: ${historicalTransactions.length}/10`
+                );
+                return;
+            }
+
+            // Analyze patterns for prediction
+            const patterns = this.analyzePredictionPatterns(historicalTransactions);
+            
+            // Generate AI prediction
+            const prediction = await this.ai.generateFinancialPrediction(historicalTransactions, balance, patterns);
+
+            // Calculate trend indicators
+            const weeklyAverage = this.calculateWeeklyAverage(historicalTransactions);
+            const monthlyTrend = this.calculateMonthlyTrend(historicalTransactions);
+
+            const response = `🔮 *Prediksi Keuangan AI*\n\n` +
+                `📊 *Analisis Historik (60 hari):*\n` +
+                `💳 Total Transaksi: ${historicalTransactions.length}\n` +
+                `📈 Rata-rata Mingguan: ${this.formatCurrency(weeklyAverage.income)} (masuk) | ${this.formatCurrency(weeklyAverage.expenses)} (keluar)\n` +
+                `📉 Trend Bulanan: ${monthlyTrend.direction} ${Math.abs(monthlyTrend.percentage).toFixed(1)}%\n\n` +
+                `🤖 *Prediksi AI:*\n${prediction}\n\n` +
+                `⚠️ *Disclaimer:* Prediksi berdasarkan pola historis dan dapat berubah sesuai kondisi.`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error generating AI prediction:', error);
+            await message.reply('❌ Gagal membuat prediksi: ' + error.message);
+        }
     }
 
     async handleAISummary(message, userPhone, args) {
@@ -1168,7 +1834,72 @@ Bot akan tampilkan menu kategori untuk dipilih!
             await message.reply('❌ Fitur AI tidak tersedia.');
             return;
         }
-        await message.reply('🚧 Fitur ringkasan AI akan segera hadir!');
+
+        try {
+            await message.reply('📋 Membuat ringkasan keuangan dengan AI...');
+
+            // Get period for summary (default: current month)
+            const period = args[0] || 'bulanan';
+            let startDate, endDate;
+            
+            const now = new Date();
+            if (period === 'mingguan' || period === 'weekly') {
+                const weekStart = new Date(now);
+                weekStart.setDate(now.getDate() - now.getDay());
+                startDate = weekStart.toISOString().split('T')[0];
+                endDate = now.toISOString().split('T')[0];
+            } else if (period === 'harian' || period === 'daily') {
+                startDate = endDate = now.toISOString().split('T')[0];
+            } else {
+                // Monthly (default)
+                const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                startDate = monthStart.toISOString().split('T')[0];
+                endDate = now.toISOString().split('T')[0];
+            }
+
+            // Get transactions for the period
+            const transactions = await this.db.getTransactionsByDateRange(userPhone, startDate, endDate);
+            const balance = await this.db.getBalance(userPhone);
+
+            if (transactions.length === 0) {
+                await message.reply(
+                    `📋 *Ringkasan AI - ${this.getPeriodName(period)}*\n\n` +
+                    '📊 Tidak ada transaksi pada periode ini.\n\n' +
+                    '💡 Mulai mencatat transaksi untuk mendapatkan ringkasan yang bermakna.'
+                );
+                return;
+            }
+
+            // Analyze period data
+            const periodAnalysis = this.analyzePeriodData(transactions, startDate, endDate);
+            
+            // Generate AI summary
+            const summary = await this.ai.generateFinancialSummary(transactions, balance, periodAnalysis, period);
+
+            // Calculate key metrics
+            const periodIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + parseFloat(t.amount), 0);
+            const periodExpenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + parseFloat(t.amount), 0);
+            const periodBalance = periodIncome - periodExpenses;
+
+            // Get top categories
+            const topCategories = this.getTopExpenseCategories(transactions.filter(t => t.type === 'expense'));
+
+            const response = `📋 *Ringkasan AI - ${this.getPeriodName(period)}*\n\n` +
+                `📊 *Metrik Periode:*\n` +
+                `📈 Pemasukan: ${this.formatCurrency(periodIncome)}\n` +
+                `📉 Pengeluaran: ${this.formatCurrency(periodExpenses)}\n` +
+                `💵 Selisih: ${this.formatCurrency(periodBalance)}\n` +
+                `🔢 Total Transaksi: ${transactions.length}\n\n` +
+                `🏷️ *Kategori Teratas:*\n${topCategories}\n\n` +
+                `🤖 *Ringkasan AI:*\n${summary}\n\n` +
+                `💡 *Tips:* Gunakan /saran untuk rekomendasi atau /prediksi-ai untuk prediksi masa depan.`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error generating AI summary:', error);
+            await message.reply('❌ Gagal membuat ringkasan: ' + error.message);
+        }
     }
 
     async handleAutoCategory(message, userPhone, args) {
@@ -1176,7 +1907,95 @@ Bot akan tampilkan menu kategori untuk dipilih!
             await message.reply('❌ Fitur AI tidak tersedia.');
             return;
         }
-        await message.reply('🚧 Fitur kategorisasi otomatis akan segera hadir!');
+
+        try {
+            await message.reply('🤖 Menganalisis dan mengkategorikan transaksi dengan AI...');
+
+            // Get recent uncategorized or miscategorized transactions
+            const recentTransactions = await this.db.getTransactions(userPhone, 50);
+            const categories = await this.db.getCategories(userPhone);
+
+            if (recentTransactions.length === 0) {
+                await message.reply(
+                    '🏷️ *Auto Kategorisasi AI*\n\n' +
+                    '📊 Tidak ada transaksi yang perlu dikategorisasi.\n\n' +
+                    '💡 Tambahkan beberapa transaksi terlebih dahulu.'
+                );
+                return;
+            }
+
+            // Find transactions that might need better categorization
+            const suggestedChanges = [];
+            let processedCount = 0;
+
+            for (const transaction of recentTransactions) {
+                if (processedCount >= 10) break; // Limit to 10 suggestions at a time
+
+                const aiSuggestion = await this.ai.suggestCategory(
+                    transaction.description,
+                    transaction.type,
+                    categories
+                );
+
+                if (aiSuggestion && aiSuggestion.category &&
+                    aiSuggestion.confidence > 0.8 &&
+                    aiSuggestion.category.name !== transaction.category_name) {
+                    
+                    suggestedChanges.push({
+                        transaction,
+                        suggested: aiSuggestion,
+                        current: transaction.category_name || 'Tidak ada'
+                    });
+                    processedCount++;
+                }
+            }
+
+            if (suggestedChanges.length === 0) {
+                await message.reply(
+                    '🏷️ *Auto Kategorisasi AI*\n\n' +
+                    '✅ Semua transaksi terbaru sudah dikategorikan dengan baik!\n\n' +
+                    `📊 Dianalisis: ${Math.min(recentTransactions.length, 10)} transaksi terbaru\n` +
+                    '🤖 Tidak ada saran perubahan kategori.\n\n' +
+                    '💡 AI akan terus memantau dan memberikan saran untuk transaksi baru.'
+                );
+                return;
+            }
+
+            // Show suggestions
+            let response = `🏷️ *Auto Kategorisasi AI*\n\n`;
+            response += `📊 *Saran Perubahan Kategori:*\n\n`;
+
+            suggestedChanges.forEach((change, index) => {
+                const confidencePercent = Math.round(change.suggested.confidence * 100);
+                response += `${index + 1}. 💳 **${change.transaction.description}**\n`;
+                response += `   💰 ${this.formatCurrency(change.transaction.amount)}\n`;
+                response += `   🔄 ${change.current} → **${change.suggested.category.name}**\n`;
+                response += `   🤖 Keyakinan: ${confidencePercent}%\n`;
+                response += `   🆔 ID: ${change.transaction.id}\n\n`;
+            });
+
+            response += `💡 *Cara Menggunakan:*\n`;
+            response += `• Gunakan /edit [ID] untuk mengubah kategori\n`;
+            response += `• Contoh: /edit ${suggestedChanges[0].transaction.id}\n\n`;
+            response += `🔄 *Auto-Apply:* Ketik "apply auto" untuk menerapkan semua saran dengan keyakinan >90%`;
+
+            // Store suggestions for auto-apply
+            if (!global.autoCategorizationSuggestions) {
+                global.autoCategorizationSuggestions = new Map();
+            }
+            
+            const highConfidenceSuggestions = suggestedChanges.filter(c => c.suggested.confidence > 0.9);
+            global.autoCategorizationSuggestions.set(userPhone, {
+                suggestions: highConfidenceSuggestions,
+                timestamp: Date.now()
+            });
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in auto categorization:', error);
+            await message.reply('❌ Gagal melakukan kategorisasi otomatis: ' + error.message);
+        }
     }
 
     async handleNewCategory(message, userPhone, args) {
@@ -1344,6 +2163,354 @@ Bot akan tampilkan menu kategori untuk dipilih!
 
     async handlePrediction(message, userPhone, args) {
         await message.reply('🚧 Fitur prediksi arus kas akan segera hadir!');
+    }
+
+    // Admin Menu Handler
+    async handleAdminMenu(message, userPhone, args) {
+        try {
+            // Check if user is admin
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            if (!isAdmin) {
+                await message.reply('❌ Akses ditolak. Hanya admin yang dapat menggunakan menu ini.');
+                return;
+            }
+
+            const adminMenuText = `👑 *Menu Administrator*
+
+🛠️ *MANAJEMEN USER:*
+
+📋 /user-list - Lihat 10 user terbaru
+👤 /user-detail [phone] - Detail lengkap user
+🔄 /change-plan [phone] [plan] - Ubah plan user
+⛔ /suspend-user [phone] - Suspend/unsuspend user
+🔃 /reset-limit [phone] - Reset limit harian user
+
+🏷️ *MANAJEMEN KATEGORI:*
+
+➕ /kategori-baru [nama] [type] [warna] - Tambah kategori baru
+✏️ /edit-kategori [id] [nama] [warna] - Edit kategori
+🗑️ /hapus-kategori [id] - Nonaktifkan kategori
+
+📊 *INFORMASI SISTEM:*
+
+📈 /stats - Statistik sistem
+
+💡 *Contoh Penggunaan:*
+
+• /user-detail +6281234567890
+• /change-plan +6281234567890 premium
+• /reset-limit +6281234567890
+• /suspend-user +6281234567890
+
+🔄 *Plan yang tersedia:* free, premium
+
+⚠️ *Perhatian:* Hanya admin yang dapat menggunakan menu ini!`;
+
+            await message.reply(adminMenuText);
+        } catch (error) {
+            this.logger.error('Error in handleAdminMenu:', error);
+            await message.reply('❌ Terjadi kesalahan saat mengakses menu admin.');
+        }
+    }
+
+    // Change User Plan (Admin only)
+    async handleChangePlan(message, userPhone, args) {
+        try {
+            // Check if user is admin
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            if (!isAdmin) {
+                await message.reply('❌ Akses ditolak. Hanya admin yang dapat mengubah plan user.');
+                return;
+            }
+
+            if (args.length < 2) {
+                await message.reply('📝 Cara pakai: /change-plan [nomor_phone] [nama_plan]\n\nContoh: /change-plan +6281234567890 premium\n\nPlan tersedia: free, premium');
+                return;
+            }
+
+            const targetPhone = args[0];
+            const newPlanName = args[1].toLowerCase();
+
+            // Validate target user exists
+            const targetUser = await this.db.getUser(targetPhone);
+            if (!targetUser) {
+                await message.reply(`❌ User dengan nomor ${targetPhone} tidak ditemukan.`);
+                return;
+            }
+
+            // Change the plan
+            const newPlan = await this.db.changeUserPlan(userPhone, targetPhone, newPlanName);
+            
+            await message.reply(
+                `✅ *Plan Berhasil Diubah!*\n\n` +
+                `👤 User: ${targetUser.name} (${targetPhone})\n` +
+                `💎 Plan Baru: ${newPlan.display_name}\n` +
+                `📊 Limit Transaksi: ${newPlan.monthly_transaction_limit || '∞'} per hari\n` +
+                `🔄 Kuota transaksi telah direset ke 0.`
+            );
+
+        } catch (error) {
+            this.logger.error('Error in handleChangePlan:', error);
+            await message.reply('❌ Gagal mengubah plan: ' + error.message);
+        }
+    }
+
+    // Suspend User (Admin only)
+    async handleSuspendUser(message, userPhone, args) {
+        try {
+            // Check if user is admin
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            if (!isAdmin) {
+                await message.reply('❌ Akses ditolak. Hanya admin yang dapat menangguhkan user.');
+                return;
+            }
+
+            if (args.length < 1) {
+                await message.reply('📝 Cara pakai: /suspend-user [nomor_phone]\n\nContoh: /suspend-user +6281234567890\n\nCatatan: Jika user sudah suspended, perintah ini akan meng-unsuspend.');
+                return;
+            }
+
+            const targetPhone = args[0];
+
+            // Validate target user exists
+            const targetUser = await this.db.getUser(targetPhone);
+            if (!targetUser) {
+                await message.reply(`❌ User dengan nomor ${targetPhone} tidak ditemukan.`);
+                return;
+            }
+
+            // Toggle suspend status
+            const newStatus = !targetUser.is_active;
+            await this.db.suspendUser(userPhone, targetPhone, !newStatus);
+            
+            const statusText = newStatus ? 'Diaktifkan kembali' : 'Ditangguhkan';
+            const statusEmoji = newStatus ? '✅' : '⛔';
+            
+            await message.reply(
+                `${statusEmoji} *User ${statusText}!*\n\n` +
+                `👤 User: ${targetUser.name} (${targetPhone})\n` +
+                `📊 Status: ${newStatus ? 'Aktif' : 'Suspended'}\n\n` +
+                `${newStatus ? '✅ User dapat menggunakan bot kembali.' : '⛔ User tidak dapat menggunakan bot.'}`
+            );
+
+        } catch (error) {
+            this.logger.error('Error in handleSuspendUser:', error);
+            await message.reply('❌ Gagal mengubah status user: ' + error.message);
+        }
+    }
+
+    // User List (Admin only) - Show latest 10 users by default
+    async handleUserList(message, userPhone, args) {
+        try {
+            // Check if user is admin
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            if (!isAdmin) {
+                await message.reply('❌ Akses ditolak. Hanya admin yang dapat melihat daftar user.');
+                return;
+            }
+
+            // Maximum 10 users, ordered by newest first
+            const limit = 10;
+            const users = await this.db.getUserList(userPhone, limit, 0, 'newest');
+
+            if (users.length === 0) {
+                await message.reply('📋 Tidak ada user yang terdaftar.');
+                return;
+            }
+
+            let response = `📋 *10 User Terbaru (${users.length} user)*\n\n`;
+
+            users.forEach((user, index) => {
+                const status = user.is_active ? '✅' : '⛔';
+                const adminBadge = user.is_admin ? ' 👑' : '';
+                const planInfo = user.plan_name || 'No Plan';
+                
+                response += `${index + 1}. ${status} ${user.name}${adminBadge}\n`;
+                response += `   📱 ${user.phone}\n`;
+                response += `   📧 ${user.email}\n`;
+                response += `   💎 ${planInfo}\n`;
+                response += `   📊 ${user.transaction_count || 0} transaksi\n\n`;
+            });
+
+            response += `💡 *Commands:*\n`;
+            response += `• /user-detail [phone] - Detail user\n`;
+            response += `• /change-plan [phone] [plan] - Ubah plan\n`;
+            response += `• /suspend-user [phone] - Suspend/unsuspend\n`;
+            response += `• /reset-limit [phone] - Reset limit harian`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in handleUserList:', error);
+            await message.reply('❌ Gagal mengambil daftar user: ' + error.message);
+        }
+    }
+
+    // Reset User Daily Limit (Admin only)
+    async handleResetLimit(message, userPhone, args) {
+        try {
+            // Check if user is admin
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            if (!isAdmin) {
+                await message.reply('❌ Akses ditolak. Hanya admin yang dapat reset limit user.');
+                return;
+            }
+
+            if (args.length < 1) {
+                await message.reply('📝 Cara pakai: /reset-limit [nomor_phone]\n\nContoh: /reset-limit +6281234567890\n\nPerintah ini akan reset limit transaksi harian user ke 0.');
+                return;
+            }
+
+            const targetPhone = args[0];
+
+            // Check if target user exists
+            const targetUser = await this.db.getUser(targetPhone);
+            if (!targetUser) {
+                await message.reply(`❌ User dengan nomor ${targetPhone} tidak ditemukan.`);
+                return;
+            }
+
+            // Reset daily limit
+            await this.db.resetUserDailyLimit(targetPhone);
+            
+            // Get updated subscription info
+            const subscription = await this.db.getUserSubscription(targetPhone);
+            
+            await message.reply(
+                `✅ *Limit Harian Berhasil Direset!*\n\n` +
+                `👤 User: ${targetUser.name} (${targetPhone})\n` +
+                `💎 Plan: ${subscription.display_name}\n` +
+                `📊 Limit: ${subscription.monthly_transaction_limit || '∞'} transaksi/hari\n` +
+                `🔄 Transaksi count: 0 (direset)\n\n` +
+                `✅ User dapat melakukan transaksi lagi.`
+            );
+
+        } catch (error) {
+            this.logger.error('Error in handleResetLimit:', error);
+            await message.reply('❌ Gagal reset limit: ' + error.message);
+        }
+    }
+
+    // User Detail (Admin only)
+    async handleUserDetail(message, userPhone, args) {
+        try {
+            // Check if user is admin
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            if (!isAdmin) {
+                await message.reply('❌ Akses ditolak. Hanya admin yang dapat melihat detail user.');
+                return;
+            }
+
+            if (args.length < 1) {
+                await message.reply('📝 Cara pakai: /user-detail [nomor_phone]\n\nContoh: /user-detail +6281234567890');
+                return;
+            }
+
+            const targetPhone = args[0];
+
+            // Check if user exists
+            const user = await this.db.getUser(targetPhone);
+            if (!user) {
+                await message.reply(
+                    `❌ *User Belum Registrasi*\n\n` +
+                    `📱 Nomor: ${targetPhone}\n` +
+                    `📝 Status: Belum terdaftar di sistem\n\n` +
+                    `💡 User perlu mengirim pesan ke bot untuk memulai registrasi.`
+                );
+                return;
+            }
+
+            // Get subscription info
+            const subscription = await this.db.getUserSubscription(targetPhone);
+            
+            // Get transaction count for today
+            const today = new Date().toISOString().split('T')[0];
+            const todayTransactions = await this.db.getTransactionsByDateRange(targetPhone, today, today);
+            
+            // Format user detail
+            const statusEmoji = user.is_active ? '✅' : '⛔';
+            const adminBadge = user.is_admin ? ' 👑' : '';
+            const registrationStatus = user.registration_completed ? '✅ Lengkap' : '⚠️ Belum lengkap';
+            
+            let response = `👤 *Detail User*\n\n`;
+            response += `${statusEmoji} **${user.name}**${adminBadge}\n`;
+            response += `📱 Phone: ${user.phone}\n`;
+            response += `📧 Email: ${user.email || 'Tidak ada'}\n`;
+            response += `🏙️ Kota: ${user.city || 'Tidak ada'}\n`;
+            response += `🕐 Timezone: ${user.timezone || 'Asia/Jakarta'}\n\n`;
+            
+            response += `📊 **Status & Plan:**\n`;
+            response += `📝 Registrasi: ${registrationStatus}\n`;
+            response += `🔄 Aktif: ${user.is_active ? 'Ya' : 'Tidak'}\n`;
+            response += `👑 Admin: ${user.is_admin ? 'Ya' : 'Tidak'}\n`;
+            
+            if (subscription) {
+                response += `💎 Plan: ${subscription.display_name}\n`;
+                response += `📊 Transaksi hari ini: ${subscription.transaction_count || 0}`;
+                if (subscription.monthly_transaction_limit) {
+                    response += `/${subscription.monthly_transaction_limit}`;
+                }
+                response += `\n`;
+                response += `🗓️ Reset terakhir: ${subscription.last_reset_date || 'Tidak ada'}\n`;
+                response += `💳 Status bayar: ${subscription.payment_status || 'free'}\n`;
+            } else {
+                response += `💎 Plan: Tidak ada subscription\n`;
+            }
+            
+            response += `\n📈 **Aktivitas:**\n`;
+            response += `📅 Terdaftar: ${user.created_at ? new Date(user.created_at).toLocaleDateString('id-ID') : 'Tidak diketahui'}\n`;
+            response += `⏰ Aktivitas terakhir: ${user.last_activity ? new Date(user.last_activity).toLocaleString('id-ID') : 'Tidak ada'}\n`;
+            response += `🔢 Transaksi hari ini: ${todayTransactions ? todayTransactions.length : 0} transaksi\n`;
+            
+            response += `\n💡 **Quick Actions:**\n`;
+            response += `• /change-plan ${targetPhone} [plan]\n`;
+            response += `• /suspend-user ${targetPhone}\n`;
+            response += `• /reset-limit ${targetPhone}`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in handleUserDetail:', error);
+            await message.reply('❌ Gagal mengambil detail user: ' + error.message);
+        }
+    }
+
+    // AI Info Handler
+    async handleAIInfo(message, userPhone, args) {
+        try {
+            if (!this.ai.isAvailable()) {
+                await message.reply('❌ Fitur AI tidak tersedia saat ini.');
+                return;
+            }
+
+            const providerInfo = this.ai.getProviderInfo();
+            
+            let response = `🤖 *Informasi AI Provider*\n\n`;
+            response += `📡 **Provider:** ${providerInfo.provider.toUpperCase()}\n`;
+            response += `🌐 **Base URL:** ${providerInfo.baseURL}\n`;
+            response += `🔧 **Model:** ${providerInfo.model}\n`;
+            response += `✅ **Status:** ${providerInfo.isEnabled ? 'Aktif' : 'Tidak Aktif'}\n\n`;
+            
+            response += `💡 **Fitur AI yang Tersedia:**\n`;
+            response += `• /chat - Chat dengan AI\n`;
+            response += `• /analisis - Analisis keuangan AI\n`;
+            response += `• /saran - Saran keuangan personal\n`;
+            response += `• /prediksi-ai - Prediksi keuangan\n`;
+            response += `• /ringkasan-ai - Ringkasan AI\n`;
+            response += `• /kategori-otomatis - Auto kategorisasi\n\n`;
+            
+            response += `⚙️ **Konfigurasi Provider:**\n`;
+            response += `Untuk mengubah provider AI, set environment variables:\n`;
+            response += `• AI_PROVIDER=deepseek|openai|openaicompatible\n`;
+            response += `• [PROVIDER]_API_KEY\n`;
+            response += `• [PROVIDER]_BASE_URL\n`;
+            response += `• [PROVIDER]_MODEL`;
+
+            await message.reply(response);
+        } catch (error) {
+            this.logger.error('Error in handleAIInfo:', error);
+            await message.reply('❌ Terjadi kesalahan saat mengambil informasi AI provider.');
+        }
     }
 }
 

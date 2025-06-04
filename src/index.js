@@ -1,11 +1,19 @@
 // Load environment variables from .env file or environment
 require('dotenv').config({ path: '.env' });
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const {
+    default: makeWASocket,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    useMultiFileAuthState,
+    isJidBroadcast,
+    isJidGroup
+} = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const DatabaseManager = require('./database/DatabaseManager');
 const CommandHandler = require('./handlers/CommandHandler');
 const AIService = require('./services/AIService');
+const IndonesianAIAssistant = require('./services/IndonesianAIAssistant');
 const Logger = require('./utils/Logger');
 const express = require('express');
 const helmet = require('helmet');
@@ -17,14 +25,26 @@ const path = require('path');
 
 class WhatsAppFinancialBot {
     constructor() {
-        this.client = null;
+        this.sock = null;
         this.db = null;
         this.commandHandler = null;
         this.aiService = null;
+        this.indonesianAI = null;
         this.reminderService = null;
         this.logger = new Logger();
         this.app = express();
         this.setupExpress();
+        this.ensureDataDirectories();
+    }
+
+    ensureDataDirectories() {
+        // Create necessary directories
+        const dirs = ['./data', './data/sessions'];
+        dirs.forEach(dir => {
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+        });
     }
 
     setupExpress() {
@@ -32,13 +52,41 @@ class WhatsAppFinancialBot {
         this.app.use(cors());
         this.app.use(express.json());
         
+        // Serve static files from public directory
+        this.app.use(express.static(path.join(__dirname, 'public')));
+        
+        // QR Code state
+        this.currentQRCode = null;
+        this.isWhatsAppConnected = false;
+        
         // Health check endpoint
         this.app.get('/health', (req, res) => {
             res.json({
                 status: 'OK',
                 timestamp: new Date().toISOString(),
-                uptime: process.uptime()
+                uptime: process.uptime(),
+                whatsapp_connected: this.isWhatsAppConnected
             });
+        });
+
+        // QR Code routes
+        this.app.get('/qrcode', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'qrcode.html'));
+        });
+
+        this.app.get('/qrcode/status', (req, res) => {
+            res.json({
+                qr: this.currentQRCode,
+                connected: this.isWhatsAppConnected,
+                error: null
+            });
+        });
+
+        this.app.post('/qrcode/refresh', (req, res) => {
+            this.currentQRCode = null;
+            this.isWhatsAppConnected = false;
+            this.logger.info('QR Code refresh requested');
+            res.json({ success: true });
         });
 
         // Webhook endpoint for external integrations
@@ -89,7 +137,7 @@ class WhatsAppFinancialBot {
 
     async initialize() {
         try {
-            this.logger.info('🚀 Initializing WhatsApp Financial Bot...');
+            this.logger.info('🚀 Initializing WhatsApp Financial Bot with Baileys...');
             
             // Validate environment variables
             this.validateEnvironment();
@@ -103,63 +151,14 @@ class WhatsAppFinancialBot {
             this.aiService = new AIService();
             this.logger.info('✅ AI Service initialized');
 
+            // Initialize Indonesian AI Assistant
+            this.indonesianAI = new IndonesianAIAssistant(this.db, this.aiService);
+            this.logger.info('✅ Indonesian AI Assistant initialized');
+
             // Initialize reminder service
             this.reminderService = new ReminderService(this.db);
             this.logger.info('✅ Reminder Service initialized');
 
-            // Initialize WhatsApp client with robust Docker configuration
-            this.client = new Client({
-                authStrategy: new LocalAuth({
-                    clientId: 'financial-bot',
-                    dataPath: './data/whatsapp-session'
-                }),
-                puppeteer: {
-                    headless: 'new',
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--disable-gpu',
-                        '--disable-web-security',
-                        '--disable-features=VizDisplayCompositor',
-                        '--disable-background-timer-throttling',
-                        '--disable-backgrounding-occluded-windows',
-                        '--disable-renderer-backgrounding',
-                        '--disable-ipc-flooding-protection',
-                        '--enable-features=NetworkService',
-                        '--force-color-profile=srgb',
-                        '--use-mock-keychain',
-                        '--disable-component-extensions-with-background-pages',
-                        '--disable-default-apps',
-                        '--mute-audio',
-                        '--no-default-browser-check',
-                        '--disable-background-mode',
-                        '--disable-extensions',
-                        '--disable-plugins',
-                        '--disable-translate',
-                        '--disable-sync',
-                        '--metrics-recording-only',
-                        '--safebrowsing-disable-auto-update',
-                        '--disable-component-update'
-                    ],
-                    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-                    timeout: 120000,
-                    ignoreDefaultArgs: ['--disable-extensions'],
-                    handleSIGINT: false,
-                    handleSIGTERM: false,
-                    handleSIGHUP: false
-                }
-            });
-
-            // Initialize command handler
-            this.commandHandler = new CommandHandler(this.db, this.aiService, this.client);
-            
-            this.setupEventHandlers();
-            this.setupCronJobs();
-            
             // Start WhatsApp client with retry mechanism
             await this.initializeWhatsAppWithRetry();
             
@@ -184,168 +183,202 @@ class WhatsAppFinancialBot {
     async initializeWhatsAppWithRetry(maxRetries = 5) {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                this.logger.info(`📱 Attempting to initialize WhatsApp client (attempt ${attempt}/${maxRetries})`);
+                this.logger.info(`📱 Attempting to initialize Baileys WhatsApp client (attempt ${attempt}/${maxRetries})`);
                 
-                // Clear any existing session data that might be corrupted
-                if (attempt > 1) {
-                    const sessionPath = './data/whatsapp-session';
-                    if (fs.existsSync(sessionPath)) {
-                        this.logger.info('🧹 Clearing corrupted session data...');
-                        try {
-                            if (fs.rmSync) {
-                                fs.rmSync(sessionPath, { recursive: true, force: true });
-                            } else {
-                                // Fallback for older Node.js versions
-                                const { execSync } = require('child_process');
-                                execSync(`rm -rf "${sessionPath}"`);
-                            }
-                        } catch (cleanupError) {
-                            this.logger.warn('Warning during session cleanup:', cleanupError.message);
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                    }
-                    
-                    // Recreate client with fresh configuration
-                    this.client = new Client({
-                        authStrategy: new LocalAuth({
-                            clientId: 'financial-bot',
-                            dataPath: './data/whatsapp-session'
-                        }),
-                        puppeteer: {
-                            headless: 'new',
-                            args: [
-                                '--no-sandbox',
-                                '--disable-setuid-sandbox',
-                                '--disable-dev-shm-usage',
-                                '--disable-accelerated-2d-canvas',
-                                '--no-first-run',
-                                '--no-zygote',
-                                '--disable-gpu',
-                                '--disable-web-security',
-                                '--disable-features=VizDisplayCompositor',
-                                '--disable-background-timer-throttling',
-                                '--disable-backgrounding-occluded-windows',
-                                '--disable-renderer-backgrounding',
-                                '--disable-ipc-flooding-protection',
-                                '--enable-features=NetworkService',
-                                '--force-color-profile=srgb',
-                                '--use-mock-keychain',
-                                '--disable-component-extensions-with-background-pages',
-                                '--disable-default-apps',
-                                '--mute-audio',
-                                '--no-default-browser-check',
-                                '--disable-background-mode',
-                                '--disable-extensions',
-                                '--disable-plugins',
-                                '--disable-translate',
-                                '--disable-sync',
-                                '--metrics-recording-only',
-                                '--safebrowsing-disable-auto-update',
-                                '--disable-component-update'
-                            ],
-                            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-                            timeout: 120000,
-                            ignoreDefaultArgs: ['--disable-extensions'],
-                            handleSIGINT: false,
-                            handleSIGTERM: false,
-                            handleSIGHUP: false
-                        }
-                    });
-                    
-                    this.setupEventHandlers();
-                }
-                
-                await this.client.initialize();
-                this.logger.info('✅ WhatsApp client initialized successfully');
+                await this.connectToBaileys();
+                this.logger.info('✅ Baileys WhatsApp client initialized successfully');
                 return;
                 
             } catch (error) {
-                this.logger.error(`❌ WhatsApp initialization attempt ${attempt} failed:`, error.message);
+                this.logger.error(`❌ Baileys initialization attempt ${attempt} failed:`, error.message);
                 
                 if (attempt < maxRetries) {
                     const delay = Math.min(5000 * attempt, 30000); // Exponential backoff, max 30 seconds
                     this.logger.info(`⏳ Waiting ${delay/1000} seconds before retry...`);
                     
-                    // Cleanup current client
-                    if (this.client) {
+                    // Cleanup current socket
+                    if (this.sock) {
                         try {
-                            await this.client.destroy();
+                            this.sock.end();
                         } catch (destroyError) {
-                            this.logger.warn('Warning during client cleanup:', destroyError.message);
+                            this.logger.warn('Warning during socket cleanup:', destroyError.message);
                         }
                     }
                     
                     await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
-                    throw new Error(`Failed to initialize WhatsApp after ${maxRetries} attempts: ${error.message}`);
+                    throw new Error(`Failed to initialize Baileys after ${maxRetries} attempts: ${error.message}`);
                 }
             }
         }
     }
 
-    setupEventHandlers() {
-        // QR code generation
-        this.client.on('qr', (qr) => {
-            this.logger.info('📱 QR Code generated. Scan with WhatsApp:');
-            qrcode.generate(qr, { small: true });
+    async connectToBaileys() {
+        const { state, saveCreds } = await useMultiFileAuthState('./data/sessions');
+        
+        // Fetch latest version of WA Web
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+        this.logger.info(`Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+
+        // Create minimal logger to suppress verbose Baileys logs
+        const baileysPinoLogger = {
+            fatal: () => {},
+            error: () => {},
+            warn: () => {},
+            info: () => {},
+            debug: () => {},
+            trace: () => {},
+            child: () => baileysPinoLogger
+        };
+
+        this.sock = makeWASocket({
+            version,
+            logger: baileysPinoLogger,
+            printQRInTerminal: false, // We'll handle QR code printing ourselves
+            auth: state,
+            msgRetryCounterMap: {},
+            generateHighQualityLinkPreview: true,
+            syncFullHistory: false,
+            defaultQueryTimeoutMs: undefined,
         });
 
-        // Client ready
-        this.client.on('ready', () => {
-            this.logger.info('✅ WhatsApp client is ready!');
-            this.logger.info(`📱 Bot Name: ${process.env.BOT_NAME || 'Financial Manager Bot'}`);
-        });
+        // Initialize command handler with the socket
+        this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock);
 
-        // Authentication status
-        this.client.on('authenticated', () => {
-            this.logger.info('🔐 Client authenticated successfully');
-        });
+        this.sock.ev.process(
+            async (events) => {
+                // Connection updates
+                if (events['connection.update']) {
+                    const update = events['connection.update'];
+                    const { connection, lastDisconnect, qr } = update;
 
-        this.client.on('auth_failure', (msg) => {
-            this.logger.error('❌ Authentication failed:', msg);
-        });
+                    if (qr) {
+                        this.logger.info('📱 QR Code generated for WhatsApp login');
+                        
+                        // Show QR in terminal (backup)
+                        qrcode.generate(qr, { small: true });
+                        
+                        // Convert QR to base64 for web service
+                        const QRCode = require('qrcode');
+                        try {
+                            const qrBase64 = await QRCode.toDataURL(qr);
+                            const base64Data = qrBase64.replace(/^data:image\/png;base64,/, '');
+                            this.currentQRCode = base64Data;
+                            this.isWhatsAppConnected = false;
+                            
+                            const port = process.env.PORT || 3000;
+                            this.logger.info(`🌐 QR Code available at: http://localhost:${port}/qrcode`);
+                        } catch (qrError) {
+                            this.logger.error('Error generating QR for web:', qrError);
+                        }
+                    }
 
-        // Message handling
-        this.client.on('message', async (message) => {
-            try {
-                await this.handleMessage(message);
-            } catch (error) {
-                this.logger.error('Error handling message:', error);
+                    if (connection === 'close') {
+                        // Reconnect if not logged out
+                        const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                        this.logger.info('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
+                        
+                        if (shouldReconnect) {
+                            await this.connectToBaileys();
+                        }
+                    } else if (connection === 'open') {
+                        this.logger.info('✅ WhatsApp connection opened successfully');
+                        this.logger.info(`📱 Bot Name: ${process.env.BOT_NAME || 'Financial Manager Bot'}`);
+                        
+                        // Update connection status for web interface
+                        this.isWhatsAppConnected = true;
+                        this.currentQRCode = null;
+                        
+                        this.setupCronJobs();
+                    }
+                }
+
+                // Save credentials
+                if (events['creds.update']) {
+                    await saveCreds();
+                }
+
+                // Handle messages
+                if (events['messages.upsert']) {
+                    const upsert = events['messages.upsert'];
+                    
+                    if (upsert.type === 'notify') {
+                        for (const msg of upsert.messages) {
+                            await this.handleMessage(msg);
+                        }
+                    }
+                }
             }
-        });
-
-        // Disconnection handling
-        this.client.on('disconnected', (reason) => {
-            this.logger.warn('⚠️ Client disconnected:', reason);
-        });
-
-        // Error handling
-        this.client.on('error', (error) => {
-            this.logger.error('❌ Client error:', error);
-        });
+        );
     }
 
     async handleMessage(message) {
-        // Skip if message is from status or group (optional)
-        if (message.from === 'status@broadcast') return;
+        // Skip if message is from status broadcast
+        if (isJidBroadcast(message.key.remoteJid)) return;
+        
+        // Skip if message is from group (optional - remove this if you want group support)
+        if (isJidGroup(message.key.remoteJid)) return;
 
-        // Check if user is authorized
-        const userPhone = message.from.replace('@c.us', '');
-        if (!this.isAuthorizedUser(userPhone)) {
-            await message.reply('❌ Unauthorized user. Please contact administrator.');
-            return;
-        }
+        // Skip if no message content
+        if (!message.message) return;
+
+        // Extract message text
+        const messageText = this.getMessageText(message);
+        if (!messageText) return;
+
+        // Get user info
+        const userJid = message.key.remoteJid;
+        const userPhone = userJid.replace('@s.whatsapp.net', '');
 
         // Log the message
-        this.logger.info(`📨 Message from ${userPhone}: ${message.body}`);
+        this.logger.info(`📨 Message from ${userPhone}: ${messageText}`);
 
-        // Handle the command
-        await this.commandHandler.handleMessage(message);
+        // Create a message object compatible with the handlers
+        const compatibleMessage = {
+            from: userJid,
+            body: messageText,
+            reply: async (text) => {
+                await this.sock.sendMessage(userJid, { text });
+            }
+        };
+
+        try {
+            // First, let Indonesian AI Assistant handle user registration and authentication
+            const handledByAI = await this.indonesianAI.processMessage(compatibleMessage, userPhone, messageText);
+            
+            if (handledByAI) {
+                // Message was handled by AI Assistant (registration flow or access control)
+                return;
+            }
+
+            // User is registered and authenticated, proceed with normal command handling
+            await this.commandHandler.handleMessage(compatibleMessage);
+            
+        } catch (error) {
+            this.logger.error('Error handling message:', error);
+            await this.sock.sendMessage(userJid, { text: '❌ Terjadi kesalahan saat memproses pesan Anda.' });
+        }
     }
 
+    getMessageText(message) {
+        // Extract text from different message types
+        if (message.message?.conversation) {
+            return message.message.conversation;
+        } else if (message.message?.extendedTextMessage?.text) {
+            return message.message.extendedTextMessage.text;
+        } else if (message.message?.imageMessage?.caption) {
+            return message.message.imageMessage.caption;
+        } else if (message.message?.videoMessage?.caption) {
+            return message.message.videoMessage.caption;
+        }
+        return null;
+    }
+
+    // Note: Authorization is now handled by IndonesianAIAssistant
+    // This method is kept for backward compatibility but not used
     isAuthorizedUser(phoneNumber) {
-        const allowedUsers = process.env.ALLOWED_USERS?.split(',') || [];
-        return allowedUsers.some(allowed => phoneNumber.includes(allowed.replace(/\+/g, '')));
+        // All users can now register through the AI Assistant
+        return true;
     }
 
     setupCronJobs() {
@@ -362,7 +395,7 @@ class WhatsAppFinancialBot {
         // Check reminders every hour
         cron.schedule('0 * * * *', async () => {
             try {
-                await this.reminderService.checkAndSendReminders(this.client);
+                await this.reminderService.checkAndSendReminders(this.sock);
             } catch (error) {
                 this.logger.error('❌ Reminder check failed:', error);
             }
@@ -374,7 +407,8 @@ class WhatsAppFinancialBot {
                 const adminPhone = process.env.BOT_ADMIN_PHONE;
                 if (adminPhone) {
                     const summary = await this.commandHandler.reportService.generateWeeklySummary();
-                    await this.client.sendMessage(adminPhone + '@c.us', `📊 *Weekly Summary*\n\n${summary}`);
+                    const adminJid = adminPhone.includes('@') ? adminPhone : `${adminPhone}@s.whatsapp.net`;
+                    await this.sock.sendMessage(adminJid, { text: `📊 *Weekly Summary*\n\n${summary}` });
                 }
             } catch (error) {
                 this.logger.error('❌ Weekly summary failed:', error);
@@ -386,8 +420,8 @@ class WhatsAppFinancialBot {
         this.logger.info('🛑 Shutting down bot...');
         
         try {
-            if (this.client) {
-                await this.client.destroy();
+            if (this.sock) {
+                this.sock.end();
             }
             if (this.db) {
                 await this.db.close();

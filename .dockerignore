@@ -113,3 +113,4 @@ data/*.sqlite3
 
 # Session files
 data/whatsapp-session/
+data/sessions/

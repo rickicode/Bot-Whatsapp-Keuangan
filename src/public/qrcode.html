@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot QR Code</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #333;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 16px;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+        
+        .qr-container {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 20px 0;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .qr-code {
+            max-width: 250px;
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+        }
+        
+        .loading {
+            font-size: 18px;
+            color: #3498db;
+            margin: 20px 0;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-weight: 600;
+        }
+        
+        .status.waiting {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .instructions {
+            background: #e3f2fd;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            text-align: left;
+        }
+        
+        .instructions h3 {
+            color: #1976d2;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .instructions ol {
+            color: #424242;
+            line-height: 1.6;
+            margin-left: 20px;
+        }
+        
+        .instructions li {
+            margin-bottom: 8px;
+        }
+        
+        .refresh-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+        
+        .refresh-btn:hover {
+            background: #2980b9;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+            font-size: 14px;
+            color: #95a5a6;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+            
+            .title {
+                font-size: 24px;
+            }
+            
+            .qr-code {
+                max-width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🤖 Bot Keuangan WhatsApp</h1>
+        <p class="subtitle">Scan QR code untuk menghubungkan WhatsApp</p>
+        
+        <div class="qr-container">
+            <div id="qr-content">
+                <div class="loading">⏳ Menunggu QR code...</div>
+            </div>
+        </div>
+        
+        <div id="status" class="status waiting">
+            🔄 Menunggu koneksi WhatsApp...
+        </div>
+        
+        <button class="refresh-btn" onclick="refreshQR()">🔄 Refresh QR Code</button>
+        
+        <div class="instructions">
+            <h3>📱 Cara Scan QR Code:</h3>
+            <ol>
+                <li>Buka aplikasi <strong>WhatsApp</strong> di HP Anda</li>
+                <li>Ketuk <strong>titik tiga</strong> di pojok kanan atas</li>
+                <li>Pilih <strong>"Perangkat Tertaut"</strong></li>
+                <li>Ketuk <strong>"Tautkan Perangkat"</strong></li>
+                <li><strong>Scan QR code</strong> yang muncul di atas</li>
+                <li>Tunggu hingga terhubung ✅</li>
+            </ol>
+        </div>
+        
+        <div class="footer">
+            <p>🔒 Koneksi aman dan terenkripsi</p>
+            <p>Auto-refresh setiap 30 detik</p>
+        </div>
+    </div>
+
+    <script>
+        let isConnected = false;
+        
+        function updateQRCode() {
+            if (isConnected) return;
+            
+            fetch('/qrcode/status')
+                .then(response => response.json())
+                .then(data => {
+                    const qrContent = document.getElementById('qr-content');
+                    const status = document.getElementById('status');
+                    
+                    if (data.qr) {
+                        qrContent.innerHTML = `<img src="data:image/png;base64,${data.qr}" class="qr-code" alt="QR Code">`;
+                        status.className = 'status waiting';
+                        status.innerHTML = '📱 Scan QR code dengan WhatsApp Anda';
+                    } else if (data.connected) {
+                        qrContent.innerHTML = '<div style="font-size: 48px; color: #27ae60;">✅</div><div style="margin-top: 15px; font-size: 18px; color: #27ae60; font-weight: 600;">Terhubung!</div>';
+                        status.className = 'status connected';
+                        status.innerHTML = '🎉 Bot WhatsApp berhasil terhubung dan siap digunakan!';
+                        isConnected = true;
+                    } else if (data.error) {
+                        qrContent.innerHTML = '<div style="font-size: 48px; color: #e74c3c;">❌</div><div style="margin-top: 15px; font-size: 16px; color: #e74c3c;">Error</div>';
+                        status.className = 'status error';
+                        status.innerHTML = `❌ Error: ${data.error}`;
+                    } else {
+                        qrContent.innerHTML = '<div class="loading">⏳ Menunggu QR code...</div>';
+                        status.className = 'status waiting';
+                        status.innerHTML = '🔄 Menunggu koneksi WhatsApp...';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    const status = document.getElementById('status');
+                    status.className = 'status error';
+                    status.innerHTML = '❌ Gagal mengambil QR code. Silakan refresh halaman.';
+                });
+        }
+        
+        function refreshQR() {
+            if (isConnected) return;
+            
+            const qrContent = document.getElementById('qr-content');
+            qrContent.innerHTML = '<div class="loading">🔄 Memuat ulang QR code...</div>';
+            
+            fetch('/qrcode/refresh', { method: 'POST' })
+                .then(() => {
+                    setTimeout(updateQRCode, 1000);
+                })
+                .catch(error => {
+                    console.error('Error refreshing QR:', error);
+                });
+        }
+        
+        // Auto-update setiap 5 detik
+        setInterval(updateQRCode, 5000);
+        
+        // Initial load
+        updateQRCode();
+    </script>
+</body>
+</html>
