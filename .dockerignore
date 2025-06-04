@@ -22,9 +22,11 @@ exports/
 docs/
 
 # Docker files
-docker/
 docker-compose.yml
 Dockerfile*
+
+# Allow entrypoint script
+!docker/entrypoint.sh
 
 # Testing
 test/

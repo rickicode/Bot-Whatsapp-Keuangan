@@ -7,8 +7,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
+# Install git and build dependencies
+RUN apk add --no-cache git python3 make g++
+
 # Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --only=production
 
 # Production stage
 FROM node:20-alpine
@@ -41,19 +44,9 @@ RUN echo "*/5 * * * * cd /app && /usr/local/bin/node scripts/cleanup-sessions.js
     chmod 0644 /etc/cron.d/session-cleanup && \
     chmod 0644 /etc/cron.d/anti-spam
 
-# Create entrypoint script
-RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
-    echo 'set -e' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
-    echo '# Validate environment and create .env file' >> /app/entrypoint.sh && \
-    echo 'node scripts/create-env.js' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
-    echo '# Start cron daemon' >> /app/entrypoint.sh && \
-    echo 'crond' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
-    echo '# Execute the main command' >> /app/entrypoint.sh && \
-    echo 'exec "$@"' >> /app/entrypoint.sh && \
-    chmod +x /app/entrypoint.sh
+# Copy and set up entrypoint script
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Expose port
 EXPOSE 3000
