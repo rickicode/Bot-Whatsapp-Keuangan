@@ -55,17 +55,9 @@ RUN chmod 0644 /etc/cron.d/session-cleanup && \
     crontab -u appuser /etc/cron.d/session-cleanup && \
     crontab -u appuser /etc/cron.d/anti-spam
 
-# Create startup script
+# Create startup script (runs as appuser)
 RUN echo '#!/bin/bash' > /app/start.sh && \
     echo 'set -e' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Check and validate environment variables' >> /app/start.sh && \
-    echo 'echo "🔧 Validating environment configuration..."' >> /app/start.sh && \
-    echo 'node scripts/create-env.js' >> /app/start.sh && \
-    echo 'if [ $? -ne 0 ]; then' >> /app/start.sh && \
-    echo '    echo "❌ Environment validation failed"' >> /app/start.sh && \
-    echo '    exit 1' >> /app/start.sh && \
-    echo 'fi' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Start cron service' >> /app/start.sh && \
     echo 'crond -f &' >> /app/start.sh && \
@@ -94,6 +86,28 @@ RUN echo '#!/bin/bash' > /app/start.sh && \
     echo 'wait $NODE_PID' >> /app/start.sh && \
     chmod +x /app/start.sh
 
+# Create the .env validation script that runs as root, then switches user
+RUN echo '#!/bin/bash' > /app/validate-env.sh && \
+    echo 'set -e' >> /app/validate-env.sh && \
+    echo '' >> /app/validate-env.sh && \
+    echo '# Run environment validation as root to create .env file' >> /app/validate-env.sh && \
+    echo 'echo "🔧 Validating environment configuration..."' >> /app/validate-env.sh && \
+    echo 'node scripts/create-env.js' >> /app/validate-env.sh && \
+    echo 'if [ $? -ne 0 ]; then' >> /app/validate-env.sh && \
+    echo '    echo "❌ Environment validation failed"' >> /app/validate-env.sh && \
+    echo '    exit 1' >> /app/validate-env.sh && \
+    echo 'fi' >> /app/validate-env.sh && \
+    echo '' >> /app/validate-env.sh && \
+    echo '# Fix ownership of created .env file' >> /app/validate-env.sh && \
+    echo 'chown appuser:nodejs .env 2>/dev/null || true' >> /app/validate-env.sh && \
+    echo '' >> /app/validate-env.sh && \
+    echo '# Switch to non-root user and run the main startup script' >> /app/validate-env.sh && \
+    echo 'exec su-exec appuser /app/start.sh' >> /app/validate-env.sh && \
+    chmod +x /app/validate-env.sh
+
+# Install su-exec for user switching
+RUN apk add --no-cache su-exec
+
 # Switch to non-root user
 USER appuser
 
@@ -104,5 +118,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-# Start the application with cron services
-CMD ["/app/start.sh"]
+# Start the application with environment validation and cron services
+CMD ["/app/validate-env.sh"]
