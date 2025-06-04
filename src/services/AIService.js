@@ -760,6 +760,94 @@ Jenis: ${type === 'income' ? 'Pemasukan' : 'Pengeluaran'}`;
         }
     }
 
+    async parseBulkTransactions(text, userPhone) {
+        const systemPrompt = `Kamu adalah parser transaksi keuangan bulk untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak multiple transaksi sekaligus.
+
+Kembalikan HANYA objek JSON dengan format:
+{
+  "transactions": [
+    {
+      "type": "income" atau "expense",
+      "amount": number (tanpa simbol mata uang),
+      "description": string (dalam bahasa Indonesia),
+      "category": string (kategori yang sesuai dalam bahasa Indonesia, atau "unknown" jika tidak yakin),
+      "confidence": number (0-1, seberapa yakin dalam parsing)
+    }
+  ],
+  "totalTransactions": number,
+  "overallConfidence": number (0-1, rata-rata confidence semua transaksi)
+}
+
+Contoh input:
+"Habis belanja baju albi 33k
+Mainan albi 30k
+Galon + kopi 20k
+Parkir 2k
+Permen 2k"
+
+Hasil yang diharapkan:
+{
+  "transactions": [
+    {"type":"expense","amount":33000,"description":"belanja baju albi","category":"Belanja","confidence":0.9},
+    {"type":"expense","amount":30000,"description":"mainan albi","category":"Belanja","confidence":0.8},
+    {"type":"expense","amount":20000,"description":"galon + kopi","category":"Makanan","confidence":0.9},
+    {"type":"expense","amount":2000,"description":"parkir","category":"Transportasi","confidence":0.9},
+    {"type":"expense","amount":2000,"description":"permen","category":"Makanan","confidence":0.9}
+  ],
+  "totalTransactions": 5,
+  "overallConfidence": 0.88
+}
+
+Rules:
+1. Pisahkan berdasarkan line break atau pola yang jelas
+2. Deteksi angka (k=ribu, jt=juta, rb=ribu)
+3. Identifikasi jenis transaksi (default expense jika tidak jelas)
+4. Berikan kategori yang tepat untuk setiap transaksi
+5. Minimum confidence 0.6 untuk dianggap valid
+6. Jika ada transaksi yang tidak jelas, set confidence rendah
+
+Input pengguna: "${text}"`;
+
+        try {
+            const response = await this.makeRequest([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: text }
+            ], 0.3, 800);
+
+            // Try to parse JSON response
+            const cleanResponse = response.replace(/```json\s*|\s*```/g, '').trim();
+            const parsed = JSON.parse(cleanResponse);
+            
+            // Validate response structure
+            if (!parsed.transactions || !Array.isArray(parsed.transactions)) {
+                throw new Error('Invalid response structure: missing transactions array');
+            }
+
+            // Validate each transaction
+            const validTransactions = parsed.transactions.filter(t =>
+                t.type && t.amount && t.description && t.confidence >= 0.6
+            );
+
+            return {
+                transactions: validTransactions,
+                totalTransactions: validTransactions.length,
+                overallConfidence: validTransactions.length > 0
+                    ? validTransactions.reduce((sum, t) => sum + t.confidence, 0) / validTransactions.length
+                    : 0,
+                originalTotal: parsed.transactions.length,
+                filtered: parsed.transactions.length - validTransactions.length
+            };
+        } catch (error) {
+            this.logger.error('Error parsing bulk transactions:', error);
+            return {
+                transactions: [],
+                totalTransactions: 0,
+                overallConfidence: 0,
+                error: error.message
+            };
+        }
+    }
+
     isAvailable() {
         return this.isEnabled;
     }

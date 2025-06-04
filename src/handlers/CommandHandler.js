@@ -98,7 +98,11 @@ class CommandHandler {
             '/user-list': this.handleUserList.bind(this),
             '/reset-limit': this.handleResetLimit.bind(this),
             '/user-detail': this.handleUserDetail.bind(this),
-            '/ai-info': this.handleAIInfo.bind(this)
+            '/ai-info': this.handleAIInfo.bind(this),
+            
+            // Bulk transaction features
+            '/bulk': this.handleBulkTransaction.bind(this),
+            '/bulk-transaksi': this.handleBulkTransaction.bind(this)
         };
     }
 
@@ -113,6 +117,11 @@ class CommandHandler {
             
             // Check if user has pending transaction confirmation
             if (await this.handlePendingTransaction(message, userPhone, text)) {
+                return;
+            }
+            
+            // Check if user has pending bulk transaction session
+            if (await this.handleBulkTransactionSession(message, userPhone, text)) {
                 return;
             }
             
@@ -164,6 +173,11 @@ class CommandHandler {
             
             // First check if this might be an edit instruction
             if (await this.handleNaturalLanguageEdit(message, userPhone, text)) {
+                return;
+            }
+            
+            // Check if this might be a bulk transaction (multiple lines or multiple transaction indicators)
+            if (await this.detectAndHandleBulkTransaction(message, userPhone, text)) {
                 return;
             }
             
@@ -665,6 +679,7 @@ class CommandHandler {
 
 💰 /masuk [jumlah] [deskripsi] - Tambah pemasukan
 💸 /keluar [jumlah] [deskripsi] - Tambah pengeluaran
+💳 /bulk [multiple transaksi] - Tambah banyak transaksi sekaligus
 🔍 /cari [kata kunci] - Cari transaksi
 ✏️ /edit [id] - Edit transaksi
 🗑️ /hapus [id] - Hapus transaksi
@@ -672,7 +687,9 @@ class CommandHandler {
 🆘 *BUTUH BANTUAN?*
 Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 
-✨ *Tips:* Coba ketik dengan bahasa natural seperti "saya habis 50000 untuk makan siang" - AI akan otomatis memproses!`;
+✨ *Tips:*
+• Coba ketik dengan bahasa natural seperti "saya habis 50000 untuk makan siang" - AI akan otomatis memproses!
+• Untuk multiple transaksi, ketik langsung atau gunakan /bulk`;
 
         await message.reply(menuText);
     }
@@ -688,6 +705,14 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 
 • /keluar [jumlah] [deskripsi] [kategori]
   💡 Contoh: /keluar 50000 makan siang makanan
+
+💳 *BULK TRANSAKSI (BARU!):*
+
+• /bulk [multiple transaksi]
+  💡 Contoh: /bulk Habis belanja baju 33k
+           Mainan anak 30k
+           Galon + kopi 20k
+           Parkir 2k
 
 📊 *LIHAT DATA:*
 
@@ -716,7 +741,8 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 💡 *Tips Cepat:*
 1. Gunakan /saldo untuk lihat ID transaksi
 2. Edit langsung: "edit transaksi 123 ubah jumlah jadi 100000"
-3. Ketik natural: "saya habis 25000 beli kopi"`;
+3. Ketik natural: "saya habis 25000 beli kopi"
+4. Bulk natural: AI auto-deteksi multiple transaksi!`;
 
         await message.reply(helpText);
     }
@@ -734,6 +760,18 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 • /ringkasan-ai [periode] - Ringkasan AI (harian/mingguan/bulanan)
 • /kategori-otomatis - Auto kategorisasi transaksi dengan AI
 
+💳 *BULK TRANSAKSI AI (FITUR BARU!):*
+
+• /bulk [multiple transaksi] - Input banyak transaksi sekaligus
+• AI auto-deteksi: ketik langsung multiple transaksi, AI otomatis proses!
+
+✅ *Contoh Bulk Transaksi:*
+Habis belanja baju albi 33k
+Mainan albi 30k
+Galon + kopi 20k
+Parkir 2k
+Permen 2k
+
 💡 *BAHASA NATURAL (FITUR UNGGULAN):*
 
 Ketik seperti berbicara normal, AI otomatis memproses!
@@ -749,6 +787,10 @@ Ketik seperti berbicara normal, AI otomatis memproses!
 • "Bayar listrik 150000"
 • "Belanja groceries 200000"
 
+✅ *Contoh Multiple Transaksi (Auto-Bulk):*
+• "Hari ini beli kopi 25k, makan siang 50k, bensin 100k"
+• "Belanja: beras 50k, telur 30k, sayur 20k"
+
 🔧 *EDIT DENGAN AI:*
 
 • "Edit transaksi 123 ubah jumlah jadi 75000"
@@ -758,10 +800,11 @@ Ketik seperti berbicara normal, AI otomatis memproses!
 
 🤖 *BAGAIMANA AI BEKERJA:*
 
-1. **Deteksi Otomatis** - AI mengenali jenis transaksi
+1. **Deteksi Otomatis** - AI mengenali jenis transaksi (single/bulk)
 2. **Smart Categorization** - AI sarankan kategori yang tepat
 3. **Confidence Score** - Tingkat keyakinan AI (60-100%)
 4. **Konfirmasi Interaktif** - Jika AI tidak yakin, akan bertanya
+5. **Bulk Processing** - Proses multiple transaksi sekaligus
 
 ⚠️ *JIKA AI TIDAK YAKIN:*
 Bot akan tampilkan menu kategori untuk dipilih!
@@ -773,11 +816,12 @@ Bot akan tampilkan menu kategori untuk dipilih!
 • Sebutkan angka tanpa titik/koma
 • Gunakan nama kategori yang sudah ada
 • Berikan konteks yang cukup
+• Pisahkan transaksi dengan baris baru untuk bulk
 
 ❌ **DON'T:**
 • Kalimat terlalu singkat atau ambigu
-• Campur multiple transaksi dalam satu pesan
 • Gunakan singkatan yang tidak jelas
+• Campur transaksi yang tidak berhubungan
 
 📚 *BANTUAN LAINNYA:*
 
@@ -813,6 +857,16 @@ Bot akan tampilkan menu kategori untuk dipilih!
 /keluar 200000 bayar internet indihome
 \`\`\`
 
+💳 *CONTOH BULK TRANSAKSI (BARU!):*
+
+\`\`\`
+/bulk Habis belanja baju albi 33k
+Mainan albi 30k
+Galon + kopi 20k
+Parkir 2k
+Permen 2k
+\`\`\`
+
 🤖 *CONTOH BAHASA NATURAL:*
 
 ✅ **Pemasukan:**
@@ -825,6 +879,14 @@ Bot akan tampilkan menu kategori untuk dipilih!
 • "Bayar ojol 15000 ke kantor"
 • "Belanja groceries 250000 di supermarket"
 • "Makan pizza 120000 sama teman"
+
+✅ **Bulk Transaksi (Auto-Detection):**
+• "Hari ini beli kopi 25k, makan siang 50k, bensin 100k"
+• "Belanja: beras 50k, telur 30k, sayur 20k"
+• Atau langsung ketik multiple baris:
+  "Habis belanja baju 33k
+   Mainan anak 30k
+   Parkir 2k"
 
 🔧 *CONTOH EDIT TRANSAKSI:*
 
@@ -1237,6 +1299,132 @@ Bot akan tampilkan menu kategori untuk dipilih!
         }
     }
 
+    async detectAndHandleBulkTransaction(message, userPhone, text) {
+        if (!this.ai.isAvailable()) {
+            return false;
+        }
+
+        try {
+            // Detect bulk transaction patterns
+            const lines = text.split(/\n|;|,/).filter(line => line.trim().length > 0);
+            
+            // Check if it looks like bulk transactions
+            const bulkIndicators = [
+                lines.length >= 2, // Multiple lines
+                /habis|belanja|beli.*\d+.*beli|dan.*\d+.*dan/i.test(text), // Multiple purchase indicators
+                (text.match(/\d+[k|rb|ribu|jt|juta]/gi) || []).length >= 2, // Multiple amounts
+                /\d+.*\n.*\d+/m.test(text), // Numbers on different lines
+                /(^\d+[\.\s]|^-\s|\*\s)/m.test(text) // List-like formatting
+            ];
+
+            const bulkScore = bulkIndicators.filter(Boolean).length;
+            
+            // If it doesn't look like bulk, return false
+            if (bulkScore < 2) {
+                return false;
+            }
+
+            // Try to parse as bulk transaction
+            await message.reply('🤖 Mendeteksi multiple transaksi, memproses dengan bulk AI...');
+            
+            const bulkResult = await this.ai.parseBulkTransactions(text, userPhone);
+
+            if (bulkResult.error || bulkResult.totalTransactions === 0) {
+                // If bulk parsing fails, let single transaction parsing handle it
+                return false;
+            }
+
+            // If we found multiple transactions, process as bulk
+            if (bulkResult.totalTransactions >= 2) {
+                // Check transaction limits
+                const limitCheck = await this.db.checkTransactionLimit(userPhone);
+                if (!limitCheck.allowed) {
+                    if (limitCheck.reason === 'Daily limit reached') {
+                        await message.reply(
+                            `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                            '⏰ Kuota akan direset besok pagi.\n' +
+                            '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                            "Ketik 'upgrade' untuk info lebih lanjut!"
+                        );
+                    } else {
+                        await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+                    }
+                    return true;
+                }
+
+                // Check if user has enough quota for all transactions
+                const remainingQuota = limitCheck.subscription.monthly_transaction_limit
+                    ? limitCheck.remaining
+                    : Infinity;
+
+                if (limitCheck.subscription.monthly_transaction_limit && bulkResult.totalTransactions > remainingQuota) {
+                    await message.reply(
+                        `⚠️ **Kuota Tidak Mencukupi untuk Bulk**\n\n` +
+                        `📊 Transaksi terdeteksi: ${bulkResult.totalTransactions}\n` +
+                        `📊 Kuota tersisa: ${remainingQuota}/${limitCheck.subscription.monthly_transaction_limit}\n\n` +
+                        `💡 **Solusi:**\n` +
+                        `• Kirim transaksi satu per satu\n` +
+                        `• Atau upgrade ke Premium untuk unlimited transaksi\n\n` +
+                        `Ketik 'upgrade' untuk info lebih lanjut!`
+                    );
+                    return true;
+                }
+
+                // Show bulk preview
+                let response = `🎯 **Auto-Detected Bulk Transaction**\n\n`;
+                response += `🤖 **AI mendeteksi ${bulkResult.totalTransactions} transaksi:**\n`;
+                response += `📊 Tingkat keyakinan rata-rata: ${Math.round(bulkResult.overallConfidence * 100)}%\n\n`;
+
+                let totalAmount = 0;
+                bulkResult.transactions.forEach((transaction, index) => {
+                    const emoji = transaction.type === 'income' ? '📈' : '📉';
+                    const confidencePercent = Math.round(transaction.confidence * 100);
+                    response += `${index + 1}. ${emoji} ${this.formatCurrency(transaction.amount)}\n`;
+                    response += `   📝 ${transaction.description}\n`;
+                    response += `   🏷️ ${transaction.category}\n`;
+                    response += `   🤖 ${confidencePercent}%\n\n`;
+                    
+                    if (transaction.type === 'expense') {
+                        totalAmount += transaction.amount;
+                    } else {
+                        totalAmount -= transaction.amount;
+                    }
+                });
+
+                response += `💰 **Total pengeluaran bersih:** ${this.formatCurrency(Math.abs(totalAmount))}\n\n`;
+                
+                const newRemaining = limitCheck.subscription.monthly_transaction_limit
+                    ? remainingQuota - bulkResult.totalTransactions
+                    : '∞';
+                response += `📊 **Kuota setelah input:** ${newRemaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}\n\n`;
+
+                response += `✅ **Konfirmasi:** Balas dengan "YA" atau "KONFIRMASI" untuk menyimpan semua transaksi\n`;
+                response += `❌ **Batal:** Balas dengan "BATAL" untuk membatalkan`;
+
+                // Store bulk transaction session
+                if (!global.bulkTransactionSessions) {
+                    global.bulkTransactionSessions = new Map();
+                }
+                
+                global.bulkTransactionSessions.set(userPhone, {
+                    transactions: bulkResult.transactions,
+                    timestamp: Date.now(),
+                    totalTransactions: bulkResult.totalTransactions,
+                    overallConfidence: bulkResult.overallConfidence
+                });
+
+                await message.reply(response);
+                return true;
+            }
+
+            return false;
+
+        } catch (error) {
+            this.logger.error('Error detecting bulk transaction:', error);
+            return false;
+        }
+    }
+
     async handleEditSession(message, userPhone, text) {
         try {
             if (!global.editSessions || !global.editSessions.has(userPhone)) {
@@ -1527,6 +1715,203 @@ Bot akan tampilkan menu kategori untuk dipilih!
             await message.reply('❌ Terjadi kesalahan saat memproses konfirmasi.');
             if (global.deleteConfirmations) {
                 global.deleteConfirmations.delete(userPhone);
+            }
+            return true;
+        }
+    }
+
+    async handleBulkTransactionSession(message, userPhone, text) {
+        try {
+            if (!global.bulkTransactionSessions || !global.bulkTransactionSessions.has(userPhone)) {
+                return false;
+            }
+
+            const session = global.bulkTransactionSessions.get(userPhone);
+            
+            // Check if session is too old (5 minutes)
+            if (Date.now() - session.timestamp > 300000) {
+                global.bulkTransactionSessions.delete(userPhone);
+                await message.reply('⏰ Waktu konfirmasi bulk transaksi habis. Silakan ulangi perintah /bulk');
+                return true;
+            }
+
+            const lowerText = text.toLowerCase().trim();
+            
+            // Handle cancel
+            if (lowerText.includes('batal') || lowerText.includes('cancel')) {
+                global.bulkTransactionSessions.delete(userPhone);
+                await message.reply('❌ Bulk transaksi dibatalkan.');
+                return true;
+            }
+
+            // Handle confirmation
+            if (lowerText === 'ya' || lowerText === 'konfirmasi' || lowerText === 'yes' || lowerText === 'confirm') {
+                try {
+                    await message.reply('💾 Menyimpan semua transaksi...');
+
+                    // Check transaction limit again before processing
+                    const limitCheck = await this.db.checkTransactionLimit(userPhone);
+                    if (!limitCheck.allowed) {
+                        await message.reply('❌ Limit transaksi telah tercapai. Transaksi dibatalkan.');
+                        global.bulkTransactionSessions.delete(userPhone);
+                        return true;
+                    }
+
+                    const results = [];
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    // Process each transaction
+                    for (const transaction of session.transactions) {
+                        try {
+                            // Get categories for this user and transaction type
+                            const categories = await this.db.getCategories(userPhone, transaction.type);
+                            
+                            // Find matching category or use default
+                            let selectedCategory = categories.find(c =>
+                                c.name.toLowerCase() === transaction.category.toLowerCase() ||
+                                c.name.toLowerCase().includes(transaction.category.toLowerCase()) ||
+                                transaction.category.toLowerCase().includes(c.name.toLowerCase())
+                            );
+
+                            // If no category found, use default
+                            if (!selectedCategory) {
+                                selectedCategory = categories.find(c => c.name.includes('Lain')) || categories[0];
+                            }
+
+                            if (!selectedCategory) {
+                                throw new Error(`Tidak ada kategori ${transaction.type} yang tersedia`);
+                            }
+
+                            // Add the transaction
+                            const transactionId = await this.db.addTransaction(
+                                userPhone,
+                                transaction.type,
+                                transaction.amount,
+                                selectedCategory.id,
+                                transaction.description
+                            );
+
+                            results.push({
+                                success: true,
+                                id: transactionId,
+                                description: transaction.description,
+                                amount: transaction.amount,
+                                category: selectedCategory.name,
+                                type: transaction.type
+                            });
+                            successCount++;
+
+                            // Increment transaction count for limited plans
+                            if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                                await this.db.incrementTransactionCount(userPhone);
+                            }
+
+                        } catch (error) {
+                            this.logger.error(`Failed to add bulk transaction:`, error);
+                            results.push({
+                                success: false,
+                                description: transaction.description,
+                                amount: transaction.amount,
+                                error: error.message
+                            });
+                            failCount++;
+                        }
+                    }
+
+                    // Generate success response
+                    let response = `✅ **Bulk Transaksi Selesai!**\n\n`;
+                    response += `📊 **Hasil:**\n`;
+                    response += `✅ Berhasil: ${successCount} transaksi\n`;
+                    response += `❌ Gagal: ${failCount} transaksi\n\n`;
+
+                    if (successCount > 0) {
+                        response += `💾 **Transaksi yang Tersimpan:**\n`;
+                        const successfulTransactions = results.filter(r => r.success);
+                        let totalExpenses = 0;
+                        let totalIncome = 0;
+
+                        successfulTransactions.forEach((result, index) => {
+                            const emoji = result.type === 'income' ? '📈' : '📉';
+                            response += `${index + 1}. ${emoji} ${this.formatCurrency(result.amount)}\n`;
+                            response += `   📝 ${result.description}\n`;
+                            response += `   🏷️ ${result.category}\n`;
+                            response += `   🆔 ID: ${result.id}\n\n`;
+
+                            if (result.type === 'income') {
+                                totalIncome += result.amount;
+                            } else {
+                                totalExpenses += result.amount;
+                            }
+                        });
+
+                        response += `💰 **Ringkasan:**\n`;
+                        if (totalIncome > 0) {
+                            response += `📈 Total Pemasukan: ${this.formatCurrency(totalIncome)}\n`;
+                        }
+                        if (totalExpenses > 0) {
+                            response += `📉 Total Pengeluaran: ${this.formatCurrency(totalExpenses)}\n`;
+                        }
+                        response += `💵 Selisih: ${this.formatCurrency(totalIncome - totalExpenses)}\n\n`;
+
+                        // Show remaining quota
+                        const newRemaining = limitCheck.subscription.monthly_transaction_limit
+                            ? limitCheck.remaining - successCount
+                            : '∞';
+                        response += `📊 Sisa kuota: ${newRemaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}\n\n`;
+                    }
+
+                    if (failCount > 0) {
+                        response += `⚠️ **Transaksi yang Gagal:**\n`;
+                        const failedTransactions = results.filter(r => !r.success);
+                        failedTransactions.forEach((result, index) => {
+                            response += `${index + 1}. ${this.formatCurrency(result.amount)} - ${result.description}\n`;
+                            response += `   ❌ ${result.error}\n`;
+                        });
+                        response += '\n';
+                    }
+
+                    response += `💡 **Tips:** Gunakan /saldo untuk melihat saldo terbaru atau /laporan untuk analisis lebih detail.`;
+
+                    await message.reply(response);
+                    global.bulkTransactionSessions.delete(userPhone);
+                    return true;
+
+                } catch (error) {
+                    this.logger.error('Error processing bulk transactions:', error);
+                    await message.reply('❌ Gagal memproses bulk transaksi: ' + error.message);
+                    global.bulkTransactionSessions.delete(userPhone);
+                    return true;
+                }
+            }
+
+            // Handle edit specific transaction
+            if (lowerText.startsWith('edit ')) {
+                const editIndex = parseInt(lowerText.split(' ')[1]) - 1;
+                if (isNaN(editIndex) || editIndex < 0 || editIndex >= session.transactions.length) {
+                    await message.reply(`❌ Nomor transaksi tidak valid. Pilih antara 1-${session.transactions.length}`);
+                    return true;
+                }
+
+                // TODO: Implement individual transaction edit in bulk session
+                await message.reply('🚧 Fitur edit transaksi individual dalam bulk session akan segera hadir!\n\nUntuk saat ini, silakan batalkan dan buat ulang dengan data yang benar.');
+                return true;
+            }
+
+            // Invalid response
+            await message.reply(
+                '❓ Respons tidak valid.\n\n' +
+                '✅ Balas dengan "YA" atau "KONFIRMASI" untuk menyimpan\n' +
+                '❌ Balas dengan "BATAL" untuk membatalkan\n' +
+                '✏️ Atau "EDIT [nomor]" untuk edit transaksi tertentu'
+            );
+            return true;
+
+        } catch (error) {
+            this.logger.error('Error handling bulk transaction session:', error);
+            await message.reply('❌ Terjadi kesalahan saat memproses bulk transaksi.');
+            if (global.bulkTransactionSessions) {
+                global.bulkTransactionSessions.delete(userPhone);
             }
             return true;
         }
@@ -2550,6 +2935,155 @@ Bot akan tampilkan menu kategori untuk dipilih!
         } catch (error) {
             this.logger.error('Error in handleAIInfo:', error);
             await message.reply('❌ Terjadi kesalahan saat mengambil informasi AI provider.');
+        }
+    }
+
+    // Bulk Transaction Handler
+    async handleBulkTransaction(message, userPhone, args) {
+        if (!this.ai.isAvailable()) {
+            await message.reply('❌ Fitur AI tidak tersedia. Fitur bulk transaksi memerlukan AI untuk memproses data.');
+            return;
+        }
+
+        if (args.length === 0) {
+            await message.reply(
+                '💳 *Bulk Transaksi dengan AI*\n\n' +
+                '📝 **Cara pakai:** /bulk [daftar transaksi]\n\n' +
+                '✅ **Contoh:**\n' +
+                '```\n' +
+                '/bulk Habis belanja baju albi 33k\n' +
+                'Mainan albi 30k\n' +
+                'Galon + kopi 20k\n' +
+                'Parkir 2k\n' +
+                'Permen 2k\n' +
+                '```\n\n' +
+                '🤖 **AI akan otomatis:**\n' +
+                '• Memisahkan setiap transaksi\n' +
+                '• Mendeteksi jumlah dan deskripsi\n' +
+                '• Mengkategorikan secara otomatis\n' +
+                '• Meminta konfirmasi sebelum menyimpan\n\n' +
+                '💡 **Tips:**\n' +
+                '• Tulis satu transaksi per baris\n' +
+                '• Gunakan "k" untuk ribu (33k = 33.000)\n' +
+                '• Sebutkan aktivitas dengan jelas\n' +
+                '• Pisahkan dengan enter atau koma'
+            );
+            return;
+        }
+
+        try {
+            // Join all arguments to form the full text
+            const bulkText = args.join(' ');
+            
+            await message.reply('🤖 Sedang memproses transaksi bulk dengan AI...');
+
+            // Parse bulk transactions using AI
+            const bulkResult = await this.ai.parseBulkTransactions(bulkText, userPhone);
+
+            if (bulkResult.error) {
+                await message.reply(`❌ Gagal memproses bulk transaksi: ${bulkResult.error}`);
+                return;
+            }
+
+            if (bulkResult.totalTransactions === 0) {
+                await message.reply(
+                    '❌ Tidak ada transaksi yang berhasil diproses.\n\n' +
+                    '💡 **Tips:**\n' +
+                    '• Pastikan format jelas: "aktivitas jumlah"\n' +
+                    '• Contoh: "makan siang 25000" atau "makan siang 25k"\n' +
+                    '• Pisahkan setiap transaksi dengan baris baru\n\n' +
+                    'Coba lagi dengan format yang lebih jelas.'
+                );
+                return;
+            }
+
+            // Check transaction limits before showing preview
+            const limitCheck = await this.db.checkTransactionLimit(userPhone);
+            if (!limitCheck.allowed) {
+                if (limitCheck.reason === 'Daily limit reached') {
+                    await message.reply(
+                        `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                        '⏰ Kuota akan direset besok pagi.\n' +
+                        '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                        "Ketik 'upgrade' untuk info lebih lanjut!"
+                    );
+                } else {
+                    await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+                }
+                return;
+            }
+
+            // Check if user has enough quota for all transactions
+            const remainingQuota = limitCheck.subscription.monthly_transaction_limit
+                ? limitCheck.remaining
+                : Infinity;
+
+            if (limitCheck.subscription.monthly_transaction_limit && bulkResult.totalTransactions > remainingQuota) {
+                await message.reply(
+                    `⚠️ **Kuota Tidak Mencukupi**\n\n` +
+                    `📊 Transaksi yang akan ditambah: ${bulkResult.totalTransactions}\n` +
+                    `📊 Kuota tersisa: ${remainingQuota}/${limitCheck.subscription.monthly_transaction_limit}\n\n` +
+                    `💡 **Solusi:**\n` +
+                    `• Kurangi jumlah transaksi menjadi maksimal ${remainingQuota}\n` +
+                    `• Atau upgrade ke Premium untuk unlimited transaksi\n\n` +
+                    `Ketik 'upgrade' untuk info lebih lanjut!`
+                );
+                return;
+            }
+
+            // Show preview and ask for confirmation
+            let response = `💳 **Preview Bulk Transaksi**\n\n`;
+            response += `🤖 **AI berhasil memproses ${bulkResult.totalTransactions} transaksi:**\n`;
+            response += `📊 Tingkat keyakinan rata-rata: ${Math.round(bulkResult.overallConfidence * 100)}%\n\n`;
+
+            if (bulkResult.filtered > 0) {
+                response += `⚠️ ${bulkResult.filtered} transaksi difilter karena keyakinan rendah\n\n`;
+            }
+
+            let totalAmount = 0;
+            bulkResult.transactions.forEach((transaction, index) => {
+                const emoji = transaction.type === 'income' ? '📈' : '📉';
+                const confidencePercent = Math.round(transaction.confidence * 100);
+                response += `${index + 1}. ${emoji} ${this.formatCurrency(transaction.amount)}\n`;
+                response += `   📝 ${transaction.description}\n`;
+                response += `   🏷️ ${transaction.category}\n`;
+                response += `   🤖 ${confidencePercent}%\n\n`;
+                
+                if (transaction.type === 'expense') {
+                    totalAmount += transaction.amount;
+                } else {
+                    totalAmount -= transaction.amount;
+                }
+            });
+
+            response += `💰 **Total pengeluaran bersih:** ${this.formatCurrency(Math.abs(totalAmount))}\n\n`;
+            
+            const newRemaining = limitCheck.subscription.monthly_transaction_limit
+                ? remainingQuota - bulkResult.totalTransactions
+                : '∞';
+            response += `📊 **Kuota setelah input:** ${newRemaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}\n\n`;
+
+            response += `✅ **Konfirmasi:** Balas dengan "YA" atau "KONFIRMASI" untuk menyimpan semua transaksi\n`;
+            response += `❌ **Batal:** Balas dengan "BATAL" untuk membatalkan\n`;
+            response += `✏️ **Edit:** Balas dengan "EDIT [nomor]" untuk edit transaksi tertentu`;
+
+            // Store bulk transaction session
+            if (!global.bulkTransactionSessions) {
+                global.bulkTransactionSessions = new Map();
+            }
+            
+            global.bulkTransactionSessions.set(userPhone, {
+                transactions: bulkResult.transactions,
+                timestamp: Date.now(),
+                totalTransactions: bulkResult.totalTransactions,
+                overallConfidence: bulkResult.overallConfidence
+            });
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in handleBulkTransaction:', error);
+            await message.reply('❌ Terjadi kesalahan saat memproses bulk transaksi: ' + error.message);
         }
     }
 }
