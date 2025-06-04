@@ -94,7 +94,7 @@ ENV NODE_ENV=production \
     ENABLE_AI_FEATURES=true \
     PORT=3000 \
     # Alpine-specific memory optimizations
-    NODE_OPTIONS="--max-old-space-size=384 --gc-interval=100" \
+    NODE_OPTIONS="--max-old-space-size=384" \
     # Reduce npm memory usage
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \

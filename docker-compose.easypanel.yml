@@ -18,7 +18,7 @@ services:
       - NODE_ENV=production
       - TZ=Asia/Jakarta
       # Memory optimizations for single container
-      - NODE_OPTIONS=--max-old-space-size=320 --gc-interval=100
+      - NODE_OPTIONS=--max-old-space-size=320
       - NPM_CONFIG_FUND=false
       - NPM_CONFIG_AUDIT=false
       # Anti-spam settings optimized for EasyPanel
