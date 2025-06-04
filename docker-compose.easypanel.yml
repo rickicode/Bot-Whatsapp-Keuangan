@@ -1,0 +1,70 @@
+# EasyPanel Minimal Single Container
+# Uses Supabase for database - no local PostgreSQL needed
+
+version: '3.8'
+
+services:
+  # All-in-One WhatsApp Bot for EasyPanel with Supabase
+  whatsapp-bot-easypanel:
+    build:
+      context: .
+      dockerfile: Dockerfile.easypanel
+    container_name: whatsapp-bot-easypanel
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Production settings for EasyPanel
+      - NODE_ENV=production
+      - TZ=Asia/Jakarta
+      # Memory optimizations for single container
+      - NODE_OPTIONS=--max-old-space-size=320 --gc-interval=100
+      - NPM_CONFIG_FUND=false
+      - NPM_CONFIG_AUDIT=false
+      # Anti-spam settings optimized for EasyPanel
+      - ANTI_SPAM_USER_PER_MINUTE=15
+      - ANTI_SPAM_GLOBAL_PER_MINUTE=75
+      - ANTI_SPAM_EMERGENCY_BRAKE=true
+      - ANTI_SPAM_EMERGENCY_THRESHOLD=90
+      # Enable all features
+      - ENABLE_AI_FEATURES=true
+      - ENABLE_OCR=true
+      - ENABLE_REMINDERS=true
+      - ASK_CATEGORY_IF_UNKNOWN=true
+      # Database: Supabase (configured via .env)
+      - DATABASE_TYPE=postgres
+    volumes:
+      # Minimal persistent data for EasyPanel
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "deployment=easypanel"
+      - "database=supabase"
+      - "services=supervisord"
+      - "base=alpine-minimal"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+    deploy:
+      resources:
+        limits:
+          # Minimal resources for EasyPanel
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.3'
+          memory: 256M
+
+networks:
+  default:
+    name: easypanel-minimal

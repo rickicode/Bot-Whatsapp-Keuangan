@@ -1,0 +1,282 @@
+# Ultra-Minimal Single Container for EasyPanel with Supabase
+# Uses supervisord to run multiple services in one container
+
+FROM node:22-alpine AS base
+
+# Install minimal build dependencies (no PostgreSQL client needed)
+RUN apk add --no-cache \
+    git \
+    sqlite \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/cache/apk/*
+
+WORKDIR /app
+
+# Copy package files for dependency installation
+COPY package*.json ./
+
+# Install dependencies with aggressive optimization
+RUN npm ci --only=production --ignore-scripts && \
+    npm cache clean --force && \
+    # Remove unnecessary files for smaller image
+    find node_modules -name "*.md" -delete && \
+    find node_modules -name "*.txt" -delete && \
+    find node_modules -name "test" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find node_modules -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find node_modules -name "*.map" -delete && \
+    find node_modules -name "*.ts" -delete
+
+# Ultra-minimal production stage with supervisord
+FROM node:22-alpine AS production
+
+# Install only essential runtime dependencies (no PostgreSQL client)
+RUN apk add --no-cache \
+    supervisor \
+    curl \
+    bash \
+    sqlite \
+    tzdata \
+    dumb-init \
+    && rm -rf /var/cache/apk/* /tmp/*
+
+WORKDIR /app
+
+# Create app user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S botuser -u 1001
+
+# Copy optimized dependencies
+COPY --from=base /app/node_modules ./node_modules
+
+# Copy application code (selective copying)
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY package.json ./
+COPY .env.example ./
+
+# Create directories with proper permissions
+RUN mkdir -p data data/sessions logs backups tmp /var/log/supervisor && \
+    chown -R botuser:nodejs data data/sessions logs backups tmp && \
+    chmod 755 data data/sessions logs backups tmp
+
+# Make scripts executable
+RUN find scripts -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+
+# Create .env from environment variables
+RUN node scripts/create-env.js || echo "Warning: Could not create .env file"
+
+# Final cleanup for smaller image
+RUN rm -rf /tmp/* /var/cache/apk/* && \
+    find . -name "*.log" -delete 2>/dev/null || true
+
+# Create supervisord configuration
+COPY <<EOF /etc/supervisord.conf
+[supervisord]
+nodaemon=true
+user=root
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+childlogdir=/var/log/supervisor
+
+[unix_http_server]
+file=/var/run/supervisor.sock
+chmod=0700
+
+[supervisorctl]
+serverurl=unix:///var/run/supervisor.sock
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+# Main WhatsApp Bot Application
+[program:whatsapp-bot]
+command=node src/index.js
+directory=/app
+user=botuser
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/whatsapp-bot.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=3
+environment=NODE_ENV=production,NODE_OPTIONS="--max-old-space-size=384 --gc-interval=100"
+
+# Anti-spam Monitor (lightweight)
+[program:antispam-monitor]
+command=bash -c "sleep 60 && while true; do node scripts/anti-spam-monitor.js stats >/dev/null 2>&1 || echo 'Monitor check failed'; sleep 300; done"
+directory=/app
+user=botuser
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/antispam-monitor.log
+stdout_logfile_maxbytes=2MB
+stdout_logfile_backups=2
+
+# Session Cleanup Service
+[program:session-cleanup]
+command=bash -c "sleep 120 && while true; do node scripts/cleanup-sessions.js cleanup >/dev/null 2>&1 || echo 'Cleanup failed'; sleep 600; done"
+directory=/app
+user=botuser
+autostart=true
+autirestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/session-cleanup.log
+stdout_logfile_maxbytes=2MB
+stdout_logfile_backups=2
+
+# Health Monitor (minimal for EasyPanel)
+[program:health-monitor]
+command=bash -c "sleep 90 && while true; do if curl -sf http://localhost:3000/health >/dev/null; then echo 'Health OK'; else echo 'Health check failed'; fi; sleep 300; done"
+directory=/app
+user=botuser
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/health-monitor.log
+stdout_logfile_maxbytes=1MB
+stdout_logfile_backups=1
+
+# Log Rotator (minimal cleanup for EasyPanel)
+[program:log-rotator]
+command=bash -c "while true; do find /app/logs -name '*.log' -size +30M -delete 2>/dev/null || true; find /var/log/supervisor -name '*.log' -mtime +3 -delete 2>/dev/null || true; sleep 7200; done"
+directory=/app
+user=botuser
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/log-rotator.log
+stdout_logfile_maxbytes=500KB
+stdout_logfile_backups=1
+EOF
+
+# Create minimal health check script for EasyPanel
+COPY <<EOF /usr/local/bin/healthcheck.sh
+#!/bin/bash
+set -e
+
+# Check if supervisord is running
+if ! pgrep -f supervisord >/dev/null; then
+    echo "Supervisord not running"
+    exit 1
+fi
+
+# Check if main bot process is running
+if ! pgrep -f "node src/index.js" >/dev/null; then
+    echo "Main bot process not running"
+    exit 1
+fi
+
+# Check if bot HTTP endpoint is responding
+if ! curl -f http://localhost:3000/health >/dev/null 2>&1; then
+    echo "Bot health endpoint not responding"
+    exit 1
+fi
+
+echo "EasyPanel health check passed"
+exit 0
+EOF
+
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+# Create startup script for EasyPanel
+COPY <<EOF /usr/local/bin/start-easypanel.sh
+#!/bin/bash
+set -e
+
+echo "🚀 Starting WhatsApp Bot for EasyPanel..."
+echo "📅 Started at: \$(date)"
+echo "🐧 Base: Alpine Linux with supervisord"
+echo "👤 Running as: Multi-user (supervisord + botuser)"
+
+# Environment check
+echo "🔧 Checking environment..."
+if [ ! -f ".env" ]; then
+    echo "⚠️ No .env file found, creating from environment variables..."
+    node scripts/create-env.js || echo "Warning: Could not create .env"
+fi
+
+# Note: Using Supabase - no local database test needed
+echo "🗄️ Database: Supabase (external)"
+
+# Check disk space
+echo "💾 Checking disk space..."
+df -h | head -2 || true
+
+# Start supervisord which will manage all services
+echo "🎯 Starting supervisord with all services..."
+echo "Services that will be started:"
+echo "  - WhatsApp Bot (main application)"
+echo "  - Anti-spam Monitor (every 5 minutes)"  
+echo "  - Session Cleanup (every 10 minutes)"
+echo "  - Health Monitor (every 3 minutes)"
+echo "  - Log Rotator (every hour)"
+
+exec supervisord -c /etc/supervisord.conf
+EOF
+
+RUN chmod +x /usr/local/bin/start-easypanel.sh
+
+# Create supervisord status check script
+COPY <<EOF /usr/local/bin/supervisor-status.sh
+#!/bin/bash
+echo "📊 Supervisor Status:"
+supervisorctl status
+
+echo ""
+echo "🔍 Process Status:"
+ps aux | grep -E "(supervisord|node|cleanup|monitor)" | grep -v grep
+
+echo ""
+echo "📝 Recent Logs:"
+echo "=== Main Bot ==="
+tail -5 /var/log/supervisor/whatsapp-bot.log 2>/dev/null || echo "No bot logs yet"
+
+echo "=== Monitor ==="  
+tail -3 /var/log/supervisor/antispam-monitor.log 2>/dev/null || echo "No monitor logs yet"
+
+echo "=== Cleanup ==="
+tail -3 /var/log/supervisor/session-cleanup.log 2>/dev/null || echo "No cleanup logs yet"
+EOF
+
+RUN chmod +x /usr/local/bin/supervisor-status.sh
+
+# Set proper ownership
+RUN chown -R botuser:nodejs /app
+
+# Health check configuration for EasyPanel
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["/usr/local/bin/healthcheck.sh"]
+
+# Set environment variables optimized for single container
+ENV NODE_ENV=production \
+    LOG_LEVEL=info \
+    ANTI_SPAM_EMERGENCY_BRAKE=true \
+    ENABLE_AI_FEATURES=true \
+    PORT=3000 \
+    # Alpine-specific memory optimizations
+    NODE_OPTIONS="--max-old-space-size=384 --gc-interval=100" \
+    # Reduce npm memory usage
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    # Timezone
+    TZ=Asia/Jakarta
+
+# Expose port
+EXPOSE 3000
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start with EasyPanel-optimized script
+CMD ["/usr/local/bin/start-easypanel.sh"]
+
+# Labels for EasyPanel identification
+LABEL maintainer="WhatsApp Financial Bot for EasyPanel" \
+      version="1.0.0" \
+      description="Single container with supervisord for multiple services" \
+      deployment="easypanel" \
+      base="alpine" \
+      services="bot,monitor,cleanup,health,logs"
