@@ -1,20 +1,5 @@
-# WhatsApp Financial Bot Dockerfile
-# Multi-stage build for optimized production image
-
-FROM node:20-bullseye-slim AS base
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    git \
-    curl \
-    dumb-init \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app user for security
-RUN useradd --create-home --shell /bin/bash botuser
+# Multi-stage build for WhatsApp Financial Management Bot
+FROM node:20-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -23,126 +8,101 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --only=production && npm cache clean --force
+
+# Production stage
+FROM node:20-alpine
+
+# Install cron and other necessary packages
+RUN apk add --no-cache \
+    cron \
+    tzdata \
+    bash \
+    && rm -rf /var/cache/apk/*
+
+# Set timezone (optional, adjust as needed)
+ENV TZ=Asia/Jakarta
+
+# Create app user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S appuser -u 1001 -G nodejs
+
+# Set working directory
+WORKDIR /app
+
+# Copy node modules from builder stage
+COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 
 # Copy application code
-COPY . .
+COPY --chown=appuser:nodejs . .
 
 # Create necessary directories with proper permissions
-RUN mkdir -p \
-    /app/data \
-    /app/data/sessions \
-    /app/logs \
-    /app/backups \
-    && chown -R botuser:botuser /app
+RUN mkdir -p /app/data /app/logs /app/backups /app/exports && \
+    chown -R appuser:nodejs /app/data /app/logs /app/backups /app/exports
 
-# Create health check script
-RUN echo '#!/bin/bash\n\
-curl -f http://localhost:${PORT:-3000}/health > /dev/null 2>&1\n\
-exit $?' > /usr/local/bin/healthcheck.sh && \
-    chmod +x /usr/local/bin/healthcheck.sh
+# Create cron job files
+RUN echo "# Session cleanup every 5 minutes" > /etc/cron.d/session-cleanup && \
+    echo "*/5 * * * * appuser cd /app && /usr/local/bin/node scripts/cleanup-sessions.js cleanup >> /app/logs/cron-cleanup.log 2>&1" >> /etc/cron.d/session-cleanup && \
+    echo "" >> /etc/cron.d/session-cleanup
+
+RUN echo "# Anti-spam monitoring every 2 minutes" > /etc/cron.d/anti-spam && \
+    echo "*/2 * * * * appuser cd /app && /usr/local/bin/node scripts/anti-spam-monitor.js stats >> /app/logs/cron-antispam.log 2>&1" >> /etc/cron.d/anti-spam && \
+    echo "" >> /etc/cron.d/anti-spam
+
+# Set proper permissions for cron files
+RUN chmod 0644 /etc/cron.d/session-cleanup && \
+    chmod 0644 /etc/cron.d/anti-spam && \
+    crontab -u appuser /etc/cron.d/session-cleanup && \
+    crontab -u appuser /etc/cron.d/anti-spam
+
+# Create startup script
+RUN echo '#!/bin/bash' > /app/start.sh && \
+    echo 'set -e' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Check and validate environment variables' >> /app/start.sh && \
+    echo 'echo "🔧 Validating environment configuration..."' >> /app/start.sh && \
+    echo 'node scripts/create-env.js' >> /app/start.sh && \
+    echo 'if [ $? -ne 0 ]; then' >> /app/start.sh && \
+    echo '    echo "❌ Environment validation failed"' >> /app/start.sh && \
+    echo '    exit 1' >> /app/start.sh && \
+    echo 'fi' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Start cron service' >> /app/start.sh && \
+    echo 'crond -f &' >> /app/start.sh && \
+    echo 'CRON_PID=$!' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Function to handle shutdown' >> /app/start.sh && \
+    echo 'cleanup() {' >> /app/start.sh && \
+    echo '    echo "Shutting down services..."' >> /app/start.sh && \
+    echo '    kill $CRON_PID 2>/dev/null || true' >> /app/start.sh && \
+    echo '    kill $NODE_PID 2>/dev/null || true' >> /app/start.sh && \
+    echo '    exit 0' >> /app/start.sh && \
+    echo '}' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Set up signal handlers' >> /app/start.sh && \
+    echo 'trap cleanup SIGTERM SIGINT' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Wait a moment for cron to start' >> /app/start.sh && \
+    echo 'sleep 2' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Start the main application' >> /app/start.sh && \
+    echo 'echo "🚀 Starting WhatsApp Financial Bot..."' >> /app/start.sh && \
+    echo 'node src/index.js &' >> /app/start.sh && \
+    echo 'NODE_PID=$!' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Wait for any background process to exit' >> /app/start.sh && \
+    echo 'wait $NODE_PID' >> /app/start.sh && \
+    chmod +x /app/start.sh
 
 # Switch to non-root user
-USER botuser
-
-# Set environment variables
-ENV NODE_ENV=production
-ENV TZ=Asia/Jakarta
-ENV PORT=3000
+USER appuser
 
 # Expose port
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=60s --timeout=30s --start-period=30s --retries=3 \
-    CMD /usr/local/bin/healthcheck.sh
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-# Create entrypoint script
-COPY <<'EOF' /app/entrypoint.sh
-#!/bin/bash
-set -e
-
-echo "🔧 Setting up environment..."
-
-# Run create-env.js to generate .env file from environment variables
-echo "📝 Creating .env file from environment variables..."
-node scripts/create-env.js
-
-# Check if .env was created successfully
-if [ -f .env ]; then
-    echo "✅ .env file created successfully"
-    echo "🔍 Environment validation:"
-    # Show non-sensitive env vars for debugging
-    echo "   NODE_ENV: ${NODE_ENV:-not set}"
-    echo "   DATABASE_TYPE: ${DATABASE_TYPE:-not set}"
-    echo "   AI_PROVIDER: ${AI_PROVIDER:-not set}"
-    echo "   PORT: ${PORT:-not set}"
-else
-    echo "❌ Failed to create .env file"
-    exit 1
-fi
-
-echo "🚀 Starting WhatsApp Financial Bot..."
-
-# Function to cleanup on exit
-cleanup() {
-    echo "🛑 Shutting down gracefully..."
-    if [ ! -z "$MAIN_PID" ]; then
-        kill -TERM "$MAIN_PID" 2>/dev/null || true
-        wait "$MAIN_PID" 2>/dev/null || true
-    fi
-    if [ ! -z "$ANTISPAM_PID" ]; then
-        kill -TERM "$ANTISPAM_PID" 2>/dev/null || true
-    fi
-    if [ ! -z "$CLEANUP_PID" ]; then
-        kill -TERM "$CLEANUP_PID" 2>/dev/null || true
-    fi
-}
-
-# Set up signal handlers
-trap cleanup SIGTERM SIGINT
-
-# Start the main application in background
-node src/index.js &
-MAIN_PID=$!
-
-# Start anti-spam monitor in background
-(
-    while true; do
-        sleep 300  # 5 minutes
-        echo "🛡️ Running anti-spam monitor..."
-        node scripts/anti-spam-monitor.js monitor 2>&1 | sed 's/^/[ANTISPAM] /'
-    done
-) &
-ANTISPAM_PID=$!
-
-# Start session cleanup in background
-(
-    while true; do
-        sleep 600  # 10 minutes
-        echo "🧹 Running session cleanup..."
-        node scripts/cleanup-sessions.js cleanup 2>&1 | sed 's/^/[CLEANUP] /'
-    done
-) &
-CLEANUP_PID=$!
-
-echo "✅ All services started"
-echo "   Main app PID: $MAIN_PID"
-echo "   Anti-spam monitor PID: $ANTISPAM_PID"
-echo "   Session cleanup PID: $CLEANUP_PID"
-
-# Wait for main process
-wait $MAIN_PID
-EXIT_CODE=$?
-
-echo "🏁 Main application exited with code $EXIT_CODE"
-cleanup
-exit $EXIT_CODE
-EOF
-
-# Make entrypoint executable
-RUN chmod +x /app/entrypoint.sh
-
-# Use dumb-init as entrypoint for proper signal handling
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["/app/entrypoint.sh"]
+# Start the application with cron services
+CMD ["/app/start.sh"]
