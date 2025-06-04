@@ -11,9 +11,9 @@ class ReminderService {
         try {
             // Get users with active bills
             const users = await this.db.all(`
-                SELECT DISTINCT user_phone 
-                FROM bills 
-                WHERE is_active = 1 AND next_reminder <= date('now')
+                SELECT DISTINCT user_phone
+                FROM bills
+                WHERE is_active = true AND next_reminder <= CURRENT_DATE
             `);
 
             for (const user of users) {
@@ -35,7 +35,7 @@ class ReminderService {
                 SELECT b.*, c.name as category_name
                 FROM bills b
                 LEFT JOIN categories c ON b.category_id = c.id
-                WHERE b.user_phone = ? AND b.is_active = 1 AND b.next_reminder <= date('now')
+                WHERE b.user_phone = ? AND b.is_active = true AND b.next_reminder <= CURRENT_DATE
             `, [userPhone]);
 
             if (dueBills.length === 0) return;
@@ -79,7 +79,7 @@ class ReminderService {
                 SELECT d.*, c.name as client_name
                 FROM debts d
                 JOIN clients c ON d.client_id = c.id
-                WHERE d.due_date < date('now') AND d.status IN ('pending', 'partial')
+                WHERE d.due_date < CURRENT_DATE AND d.status IN ('pending', 'partial')
             `);
 
             // Group by user
@@ -153,7 +153,7 @@ class ReminderService {
                 case 'one-time':
                     // Disable the bill after one-time reminder
                     await this.db.run(
-                        'UPDATE bills SET is_active = 0 WHERE id = ?',
+                        'UPDATE bills SET is_active = false WHERE id = ?',
                         [billId]
                     );
                     return;
@@ -210,7 +210,7 @@ class ReminderService {
             const params = [userPhone];
 
             if (activeOnly) {
-                sql += ' AND b.is_active = 1';
+                sql += ' AND b.is_active = true';
             }
 
             sql += ' ORDER BY b.due_date ASC';
@@ -311,9 +311,9 @@ class ReminderService {
                 SELECT b.*, c.name as category_name
                 FROM bills b
                 LEFT JOIN categories c ON b.category_id = c.id
-                WHERE b.user_phone = ? 
-                AND b.due_date BETWEEN date('now') AND ?
-                AND b.is_active = 1
+                WHERE b.user_phone = ?
+                AND b.due_date BETWEEN CURRENT_DATE AND ?
+                AND b.is_active = true
                 ORDER BY b.due_date ASC
             `, [userPhone, endDate]);
 

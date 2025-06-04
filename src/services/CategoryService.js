@@ -45,7 +45,7 @@ class CategoryService {
 
     async getCategories(userPhone, type = null) {
         try {
-            let sql = 'SELECT * FROM categories WHERE user_phone IN (?, "default") AND is_active = 1';
+            let sql = 'SELECT * FROM categories WHERE user_phone IN (?, "default") AND is_active = true';
             let params = [userPhone];
 
             if (type) {
@@ -127,7 +127,7 @@ class CategoryService {
             if (transactionCount.count > 0) {
                 // Soft delete - mark as inactive
                 await this.db.run(
-                    'UPDATE categories SET is_active = 0 WHERE id = ?',
+                    'UPDATE categories SET is_active = false WHERE id = ?',
                     [categoryId]
                 );
                 this.logger.info(`Category soft deleted: ${categoryId}`);
@@ -236,7 +236,7 @@ class CategoryService {
                     MAX(t.date) as last_transaction
                 FROM categories c
                 LEFT JOIN transactions t ON c.id = t.category_id AND t.user_phone = ? ${dateFilter}
-                WHERE c.user_phone IN (?, 'default') AND c.is_active = 1
+                WHERE c.user_phone IN (?, 'default') AND c.is_active = true
                 GROUP BY c.id, c.name, c.type, c.color
                 ORDER BY total_amount DESC
             `, params.concat([userPhone]));

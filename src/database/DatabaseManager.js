@@ -284,7 +284,7 @@ class DatabaseManager {
             sql += ' ORDER BY name';
             return await this.all(sql, params);
         } else {
-            let sql = 'SELECT * FROM categories WHERE is_active = 1';
+            let sql = 'SELECT * FROM categories WHERE is_active = true';
             let params = [];
             
             if (type) {
@@ -378,7 +378,7 @@ class DatabaseManager {
             );
         } else {
             await this.run(
-                'UPDATE categories SET is_active = 0 WHERE id = ?',
+                'UPDATE categories SET is_active = false WHERE id = ?',
                 [categoryId]
             );
         }
@@ -708,8 +708,9 @@ class DatabaseManager {
                 const freePlan = await this.get('SELECT id FROM subscription_plans WHERE name = ?', ['free']);
                 if (freePlan) {
                     await this.run(
-                        `INSERT OR IGNORE INTO user_subscriptions (user_phone, plan_id, status, transaction_count, last_reset_date)
-                         VALUES (?, ?, ?, 0, date('now'))`,
+                        `INSERT INTO user_subscriptions (user_phone, plan_id, status, transaction_count, last_reset_date)
+                        VALUES (?, ?, ?, 0, CURRENT_DATE)
+                        ON CONFLICT (user_phone) DO NOTHING`,
                         [phone, freePlan.id, 'active']
                     );
                 }
@@ -849,8 +850,8 @@ class DatabaseManager {
         } else {
             await this.run(
                 `UPDATE user_subscriptions
-                 SET transaction_count = 0, last_reset_date = date('now')
-                 WHERE user_phone = ? AND (last_reset_date < date('now') OR last_reset_date IS NULL)`,
+                 SET transaction_count = 0, last_reset_date = CURRENT_DATE
+                 WHERE user_phone = ? AND (last_reset_date < CURRENT_DATE OR last_reset_date IS NULL)`,
                 [phone]
             );
         }
@@ -1009,7 +1010,7 @@ class DatabaseManager {
         } else {
             await this.run(
                 `UPDATE user_subscriptions
-                 SET plan_id = ?, transaction_count = 0, last_reset_date = date('now')
+                 SET plan_id = ?, transaction_count = 0, last_reset_date = CURRENT_DATE
                  WHERE user_phone = ?`,
                 [plan.id, targetPhone]
             );
@@ -1115,7 +1116,7 @@ class DatabaseManager {
         } else {
             await this.run(
                 `UPDATE user_subscriptions
-                 SET transaction_count = 0, last_reset_date = date('now')
+                 SET transaction_count = 0, last_reset_date = CURRENT_DATE
                  WHERE user_phone = ?`,
                 [targetPhone]
             );

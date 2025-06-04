@@ -154,7 +154,7 @@ class DebtService {
                 SELECT d.*, c.name as client_name
                 FROM debts d
                 JOIN clients c ON d.client_id = c.id
-                WHERE d.user_phone = ? AND d.due_date < date('now') AND d.status IN ('pending', 'partial')
+                WHERE d.user_phone = ? AND d.due_date < CURRENT_DATE AND d.status IN ('pending', 'partial')
                 ORDER BY d.due_date ASC
             `, [userPhone]);
 
@@ -163,7 +163,7 @@ class DebtService {
                 await this.db.run(`
                     UPDATE debts 
                     SET status = 'overdue' 
-                    WHERE user_phone = ? AND due_date < date('now') AND status IN ('pending', 'partial')
+                    WHERE user_phone = ? AND due_date < CURRENT_DATE AND status IN ('pending', 'partial')
                 `, [userPhone]);
             }
 
@@ -272,7 +272,7 @@ class DebtService {
                 FROM debts d
                 JOIN clients c ON d.client_id = c.id
                 WHERE d.user_phone = ? 
-                AND d.due_date BETWEEN date('now') AND ?
+                AND d.due_date BETWEEN CURRENT_DATE AND ?
                 AND d.status IN ('pending', 'partial')
                 ORDER BY d.due_date ASC
             `, [userPhone, endDate]);
