@@ -1,98 +1,148 @@
-# Multi-stage Dockerfile for WhatsApp Financial Bot (Single Container)
-# Base: Alpine Linux with Node.js and supervisord for process management
+# WhatsApp Financial Bot Dockerfile
+# Multi-stage build for optimized production image
 
-FROM node:20-alpine AS base
+FROM node:20-bullseye-slim AS base
 
 # Install system dependencies
-RUN apk add --no-cache \
-    supervisor \
-    curl \
-    bash \
-    openssl \
+RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
-    sqlite \
-    postgresql-client \
-    && rm -rf /var/cache/apk/*
+    git \
+    curl \
+    dumb-init \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create botuser for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S botuser -u 1001 -G nodejs
+# Create app user for security
+RUN useradd --create-home --shell /bin/bash botuser
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files first (better Docker layer caching)
+# Copy package files
 COPY package*.json ./
 
-# Install Node.js dependencies
-RUN npm ci --only=production --no-audit --no-fund && \
-    npm cache clean --force
+# Install dependencies
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Copy application source code
-COPY src/ ./src/
-COPY scripts/ ./scripts/
-COPY docker/ ./docker/
+# Copy application code
+COPY . .
 
-# Copy Docker configuration files to system locations
-COPY docker/supervisord.conf /etc/supervisord.conf
-COPY docker/healthcheck.sh /usr/local/bin/healthcheck.sh
-COPY docker/supervisor-status.sh /usr/local/bin/supervisor-status.sh
-COPY docker/start-easypanel.sh /usr/local/bin/start-easypanel.sh
+# Create necessary directories with proper permissions
+RUN mkdir -p \
+    /app/data \
+    /app/data/sessions \
+    /app/logs \
+    /app/backups \
+    && chown -R botuser:botuser /app
 
-# Make scripts executable
-RUN chmod +x /usr/local/bin/*.sh
+# Create health check script
+RUN echo '#!/bin/bash\n\
+curl -f http://localhost:${PORT:-3000}/health > /dev/null 2>&1\n\
+exit $?' > /usr/local/bin/healthcheck.sh && \
+    chmod +x /usr/local/bin/healthcheck.sh
 
-# Create necessary directories and set permissions
-RUN mkdir -p /app/data /app/data/sessions /app/logs /app/backups /app/exports \
-    /var/log/supervisor /var/run \
-    && chown -R botuser:nodejs /app \
-    && chown -R botuser:nodejs /var/log/supervisor \
-    && chmod 755 /app/data /app/logs /app/backups /app/exports
+# Switch to non-root user
+USER botuser
 
-# Create env processing script that works in Docker context
-RUN echo '#!/bin/bash' > /usr/local/bin/create-env-from-docker.sh && \
-    echo 'set -e' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo '' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo 'echo "🔧 Creating .env file from Docker environment variables..."' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo 'echo "📅 Generated at: $(date)"' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo '' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo '# Use Node.js script for better environment processing' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo 'cd /app' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo 'node scripts/create-env.js' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo '' >> /usr/local/bin/create-env-from-docker.sh && \
-    echo 'echo "✅ Environment setup completed"' >> /usr/local/bin/create-env-from-docker.sh && \
-    chmod +x /usr/local/bin/create-env-from-docker.sh
+# Set environment variables
+ENV NODE_ENV=production
+ENV TZ=Asia/Jakarta
+ENV PORT=3000
 
-# Health check configuration
+# Expose port
+EXPOSE 3000
+
+# Health check
 HEALTHCHECK --interval=60s --timeout=30s --start-period=30s --retries=3 \
     CMD /usr/local/bin/healthcheck.sh
 
-# Switch to botuser for security (supervisord will start as root then drop privileges)
-USER root
+# Create entrypoint script
+COPY <<'EOF' /app/entrypoint.sh
+#!/bin/bash
+set -e
 
-# Expose HTTP port for health checks and QR code web interface
-EXPOSE 3000
+echo "🔧 Setting up environment..."
 
-# Set essential environment variables (others handled by create-env.js)
-ENV NODE_ENV=production \
-    NODE_OPTIONS="--max-old-space-size=384" \
-    NPM_CONFIG_FUND=false \
-    NPM_CONFIG_AUDIT=false \
-    TZ=Asia/Jakarta \
-    PORT=3000 \
-    DEPLOYMENT_ENV=docker
+# Run create-env.js to generate .env file from environment variables
+echo "📝 Creating .env file from environment variables..."
+node scripts/create-env.js
 
-# Labels for better container management
-LABEL maintainer="Financial Bot Developer" \
-      description="WhatsApp Financial Management Bot - Single Container" \
-      version="1.0.0" \
-      org.opencontainers.image.title="WhatsApp Financial Bot" \
-      org.opencontainers.image.description="AI-powered WhatsApp bot for financial management" \
-      org.opencontainers.image.version="1.0.0" \
-      org.opencontainers.image.vendor="Financial Bot Team" \
-      org.opencontainers.image.licenses="MIT"
+# Check if .env was created successfully
+if [ -f .env ]; then
+    echo "✅ .env file created successfully"
+    echo "🔍 Environment validation:"
+    # Show non-sensitive env vars for debugging
+    echo "   NODE_ENV: ${NODE_ENV:-not set}"
+    echo "   DATABASE_TYPE: ${DATABASE_TYPE:-not set}"
+    echo "   AI_PROVIDER: ${AI_PROVIDER:-not set}"
+    echo "   PORT: ${PORT:-not set}"
+else
+    echo "❌ Failed to create .env file"
+    exit 1
+fi
 
-# Start supervisord which manages all services
-CMD ["/usr/local/bin/start-easypanel.sh"]
+echo "🚀 Starting WhatsApp Financial Bot..."
+
+# Function to cleanup on exit
+cleanup() {
+    echo "🛑 Shutting down gracefully..."
+    if [ ! -z "$MAIN_PID" ]; then
+        kill -TERM "$MAIN_PID" 2>/dev/null || true
+        wait "$MAIN_PID" 2>/dev/null || true
+    fi
+    if [ ! -z "$ANTISPAM_PID" ]; then
+        kill -TERM "$ANTISPAM_PID" 2>/dev/null || true
+    fi
+    if [ ! -z "$CLEANUP_PID" ]; then
+        kill -TERM "$CLEANUP_PID" 2>/dev/null || true
+    fi
+}
+
+# Set up signal handlers
+trap cleanup SIGTERM SIGINT
+
+# Start the main application in background
+node src/index.js &
+MAIN_PID=$!
+
+# Start anti-spam monitor in background
+(
+    while true; do
+        sleep 300  # 5 minutes
+        echo "🛡️ Running anti-spam monitor..."
+        node scripts/anti-spam-monitor.js monitor 2>&1 | sed 's/^/[ANTISPAM] /'
+    done
+) &
+ANTISPAM_PID=$!
+
+# Start session cleanup in background
+(
+    while true; do
+        sleep 600  # 10 minutes
+        echo "🧹 Running session cleanup..."
+        node scripts/cleanup-sessions.js cleanup 2>&1 | sed 's/^/[CLEANUP] /'
+    done
+) &
+CLEANUP_PID=$!
+
+echo "✅ All services started"
+echo "   Main app PID: $MAIN_PID"
+echo "   Anti-spam monitor PID: $ANTISPAM_PID"
+echo "   Session cleanup PID: $CLEANUP_PID"
+
+# Wait for main process
+wait $MAIN_PID
+EXIT_CODE=$?
+
+echo "🏁 Main application exited with code $EXIT_CODE"
+cleanup
+exit $EXIT_CODE
+EOF
+
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
+
+# Use dumb-init as entrypoint for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["/app/entrypoint.sh"]
