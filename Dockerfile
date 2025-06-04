@@ -1,8 +1,12 @@
 FROM node:18.20.8-bullseye
 
-# Installing only essential dependencies (removed Puppeteer/Chromium dependencies)
+# Install system dependencies including build tools for native modules
 RUN apt-get update && apt-get install -y \
     sqlite3 postgresql-client \
+    python3 make g++ \
+    libc6-dev \
+    libvips-dev \
+    pkg-config \
     --no-install-recommends \
     && apt-get clean \
     && apt-get autoremove -y \
@@ -14,9 +18,16 @@ RUN groupadd -r whatsappbot && useradd -r -g whatsappbot whatsappbot
 # Set working directory
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy package files first
 COPY package*.json ./
-RUN npm ci --only=production --legacy-peer-deps && \
+
+# Set npm configuration for better compatibility
+RUN npm config set unsafe-perm true && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000
+
+# Install dependencies with better error handling
+RUN npm ci --production --legacy-peer-deps --verbose --progress=false --unsafe-perm=true && \
     npm cache clean --force
 
 # Copy application code
@@ -25,7 +36,7 @@ COPY . .
 # Create necessary directories and set permissions (updated for Baileys)
 RUN mkdir -p data data/sessions logs backups && \
     chown -R whatsappbot:whatsappbot /app && \
-    chmod +x scripts/*.js scripts/*.sh
+    chmod +x scripts/*.js scripts/*.sh 2>/dev/null || true
 
 # Switch to non-root user
 USER whatsappbot
