@@ -24,9 +24,25 @@ class PostgresDatabase extends BaseDatabase {
                 ssl: this.config.ssl ? {
                     rejectUnauthorized: false // Required for Supabase
                 } : false,
-                max: 20, // Maximum number of clients in the pool
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 2000,
+                // Optimized pool settings for better performance
+                max: parseInt(process.env.DB_POOL_MAX) || 25, // Maximum number of clients in the pool
+                min: parseInt(process.env.DB_POOL_MIN) || 5,  // Minimum number of clients to keep in pool
+                idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000, // 30 seconds
+                connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 5000, // 5 seconds
+                acquireTimeoutMillis: parseInt(process.env.DB_ACQUIRE_TIMEOUT) || 10000, // 10 seconds
+                createTimeoutMillis: parseInt(process.env.DB_CREATE_TIMEOUT) || 5000, // 5 seconds
+                destroyTimeoutMillis: parseInt(process.env.DB_DESTROY_TIMEOUT) || 5000, // 5 seconds
+                reapIntervalMillis: parseInt(process.env.DB_REAP_INTERVAL) || 1000, // 1 second
+                createRetryIntervalMillis: parseInt(process.env.DB_CREATE_RETRY_INTERVAL) || 200, // 200ms
+                // Enable keep-alive for better connection stability
+                keepAlive: true,
+                keepAliveInitialDelayMillis: 10000,
+                // Statement timeout for long-running queries
+                statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT) || 30000, // 30 seconds
+                // Query timeout
+                query_timeout: parseInt(process.env.DB_QUERY_TIMEOUT) || 30000, // 30 seconds
+                // Application name for monitoring
+                application_name: process.env.APP_NAME || 'whatsapp-financial-bot',
             };
 
             // Add extra config if provided (for Supabase)
@@ -36,6 +52,9 @@ class PostgresDatabase extends BaseDatabase {
 
             this.pool = new Pool(poolConfig);
 
+            // Set up pool event handlers for monitoring
+            this.setupPoolEventHandlers();
+
             // Test connection
             const testClient = await this.pool.connect();
             testClient.release();
@@ -43,6 +62,13 @@ class PostgresDatabase extends BaseDatabase {
             // Create tables
             await this.createTables();
             
+            // Log pool configuration for debugging
+            this.logger.info('PostgreSQL pool initialized with config:', {
+                max: poolConfig.max,
+                min: poolConfig.min,
+                idleTimeout: poolConfig.idleTimeoutMillis,
+                connectionTimeout: poolConfig.connectionTimeoutMillis
+            });
             this.logger.info('PostgreSQL database initialized successfully');
         } catch (error) {
             this.logger.error('Error initializing PostgreSQL database:', error);
@@ -50,113 +76,236 @@ class PostgresDatabase extends BaseDatabase {
         }
     }
 
+    setupPoolEventHandlers() {
+        // Monitor pool events for debugging and optimization
+        this.pool.on('connect', (client) => {
+            if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
+                this.logger.info('New client connected to pool');
+            }
+        });
+
+        this.pool.on('acquire', (client) => {
+            if (process.env.DEBUG_POOL === 'true') {
+                this.logger.info('Client acquired from pool');
+            }
+        });
+
+        this.pool.on('remove', (client) => {
+            if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
+                this.logger.info('Client removed from pool');
+            }
+        });
+
+        this.pool.on('error', (err, client) => {
+            this.logger.error('Unexpected error on idle client', err);
+        });
+    }
+
+    async getPoolStats() {
+        if (!this.pool) return null;
+        
+        return {
+            totalCount: this.pool.totalCount,
+            idleCount: this.pool.idleCount,
+            waitingCount: this.pool.waitingCount,
+            max: this.pool.options.max,
+            min: this.pool.options.min
+        };
+    }
+
+    async healthCheck() {
+        try {
+            const client = await this.pool.connect();
+            const start = Date.now();
+            await client.query('SELECT 1');
+            const duration = Date.now() - start;
+            client.release();
+            
+            const stats = await this.getPoolStats();
+            
+            return {
+                status: 'healthy',
+                responseTime: duration,
+                poolStats: stats,
+                timestamp: new Date().toISOString()
+            };
+        } catch (error) {
+            this.logger.error('Database health check failed:', error);
+            return {
+                status: 'unhealthy',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            };
+        }
+    }
+
     async close() {
         if (this.pool) {
+            const stats = await this.getPoolStats();
+            this.logger.info('Closing PostgreSQL pool. Final stats:', stats);
             await this.pool.end();
             this.logger.info('PostgreSQL database connection closed');
         }
     }
 
     async run(sql, params = []) {
-        let client;
-        try {
-            // Get client from pool
-            client = await this.pool.connect();
-            
-            // Convert SQLite style queries to PostgreSQL
-            let pgSql = sql;
-            
-            // Convert INSERT OR IGNORE
-            if (sql.toLowerCase().includes('insert or ignore')) {
-                pgSql = sql.replace(/INSERT OR IGNORE/i, 'INSERT');
-                if (sql.toLowerCase().includes('into users')) {
-                    pgSql += ' ON CONFLICT (phone) DO NOTHING';
-                } else if (sql.toLowerCase().includes('into categories')) {
-                    pgSql += ' ON CONFLICT (user_phone, name, type) DO NOTHING';
+        return this.executeWithRetry(async () => {
+            let client;
+            try {
+                // Get client from pool with timeout
+                client = await this.pool.connect();
+                
+                // Convert SQLite style queries to PostgreSQL
+                let pgSql = sql;
+                
+                // Convert INSERT OR IGNORE
+                if (sql.toLowerCase().includes('insert or ignore')) {
+                    pgSql = sql.replace(/INSERT OR IGNORE/i, 'INSERT');
+                    if (sql.toLowerCase().includes('into users')) {
+                        pgSql += ' ON CONFLICT (phone) DO NOTHING';
+                    } else if (sql.toLowerCase().includes('into categories')) {
+                        pgSql += ' ON CONFLICT (user_phone, name, type) DO NOTHING';
+                    }
+                }
+                
+                // Convert OR REPLACE
+                if (sql.toLowerCase().includes('insert or replace')) {
+                    if (sql.toLowerCase().includes('into settings')) {
+                        pgSql = sql.replace(/INSERT OR REPLACE/i, 'INSERT');
+                        pgSql += ' ON CONFLICT (user_phone, setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = CURRENT_TIMESTAMP';
+                    }
+                }
+                
+                // Convert SQLite style ? placeholders to PostgreSQL $1, $2, etc.
+                if (!pgSql.includes('$')) {
+                    pgSql = this.convertPlaceholders(pgSql);
+                }
+                
+                // Only log SQL in debug mode
+                if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
+                    this.logger.info(`Executing SQL: ${pgSql}`, params);
+                }
+                
+                const result = await client.query(pgSql, params);
+                
+                // Return SQLite-compatible result with proper lastID
+                const lastID = result.rows.length > 0 && result.rows[0].id ? result.rows[0].id :
+                              (result.rowCount > 0 ? result.rowCount : null);
+                
+                return {
+                    lastID: lastID,
+                    changes: result.rowCount
+                };
+            } catch (error) {
+                this.logger.error('PostgreSQL run error:', error);
+                this.logger.error('SQL:', sql);
+                this.logger.error('Params:', params);
+                throw error;
+            } finally {
+                if (client) {
+                    client.release();
                 }
             }
-            
-            // Convert OR REPLACE
-            if (sql.toLowerCase().includes('insert or replace')) {
-                if (sql.toLowerCase().includes('into settings')) {
-                    pgSql = sql.replace(/INSERT OR REPLACE/i, 'INSERT');
-                    pgSql += ' ON CONFLICT (user_phone, setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = CURRENT_TIMESTAMP';
+        });
+    }
+
+    async executeWithRetry(operation, maxRetries = 3, baseDelay = 100) {
+        let lastError;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error;
+                
+                // Don't retry on certain errors
+                if (this.shouldNotRetry(error)) {
+                    throw error;
                 }
-            }
-            
-            // Convert SQLite style ? placeholders to PostgreSQL $1, $2, etc.
-            if (!pgSql.includes('$')) {
-                pgSql = this.convertPlaceholders(pgSql);
-            }
-            
-            // Only log SQL in debug mode
-            if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
-                this.logger.info(`Executing SQL: ${pgSql}`, params);
-            }
-            const result = await client.query(pgSql, params);
-            
-            // Return SQLite-compatible result with proper lastID
-            const lastID = result.rows.length > 0 && result.rows[0].id ? result.rows[0].id :
-                          (result.rowCount > 0 ? result.rowCount : null);
-            
-            return {
-                lastID: lastID,
-                changes: result.rowCount
-            };
-        } catch (error) {
-            this.logger.error('PostgreSQL run error:', error);
-            this.logger.error('SQL:', sql);
-            this.logger.error('Params:', params);
-            throw error;
-        } finally {
-            if (client) {
-                client.release();
+                
+                if (attempt === maxRetries) {
+                    this.logger.error(`Database operation failed after ${maxRetries} attempts:`, error);
+                    throw error;
+                }
+                
+                // Exponential backoff with jitter
+                const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 100;
+                this.logger.warn(`Database operation failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms:`, error.message);
+                
+                await this.sleep(delay);
             }
         }
+        
+        throw lastError;
+    }
+
+    shouldNotRetry(error) {
+        // Don't retry on syntax errors, constraint violations, etc.
+        const noRetryPatterns = [
+            'syntax error',
+            'column does not exist',
+            'relation does not exist',
+            'duplicate key value',
+            'violates check constraint',
+            'violates foreign key constraint',
+            'violates unique constraint'
+        ];
+        
+        return noRetryPatterns.some(pattern =>
+            error.message.toLowerCase().includes(pattern)
+        );
+    }
+
+    async sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     async get(sql, params = []) {
-        let client;
-        try {
-            client = await this.pool.connect();
-            let pgSql = sql;
-            if (!pgSql.includes('$')) {
-                pgSql = this.convertPlaceholders(sql);
+        return this.executeWithRetry(async () => {
+            let client;
+            try {
+                client = await this.pool.connect();
+                let pgSql = sql;
+                if (!pgSql.includes('$')) {
+                    pgSql = this.convertPlaceholders(sql);
+                }
+                const result = await client.query(pgSql, params);
+                return result.rows[0] || null;
+            } catch (error) {
+                this.logger.error('PostgreSQL get error:', error);
+                this.logger.error('SQL:', sql);
+                this.logger.error('Params:', params);
+                throw error;
+            } finally {
+                if (client) {
+                    client.release();
+                }
             }
-            const result = await client.query(pgSql, params);
-            return result.rows[0] || null;
-        } catch (error) {
-            this.logger.error('PostgreSQL get error:', error);
-            this.logger.error('SQL:', sql);
-            this.logger.error('Params:', params);
-            throw error;
-        } finally {
-            if (client) {
-                client.release();
-            }
-        }
+        });
     }
 
     async all(sql, params = []) {
-        let client;
-        try {
-            client = await this.pool.connect();
-            let pgSql = sql;
-            if (!pgSql.includes('$')) {
-                pgSql = this.convertPlaceholders(sql);
+        return this.executeWithRetry(async () => {
+            let client;
+            try {
+                client = await this.pool.connect();
+                let pgSql = sql;
+                if (!pgSql.includes('$')) {
+                    pgSql = this.convertPlaceholders(sql);
+                }
+                const result = await client.query(pgSql, params);
+                return result.rows;
+            } catch (error) {
+                this.logger.error('PostgreSQL all error:', error);
+                this.logger.error('SQL:', sql);
+                this.logger.error('Params:', params);
+                throw error;
+            } finally {
+                if (client) {
+                    client.release();
+                }
             }
-            const result = await client.query(pgSql, params);
-            return result.rows;
-        } catch (error) {
-            this.logger.error('PostgreSQL all error:', error);
-            this.logger.error('SQL:', sql);
-            this.logger.error('Params:', params);
-            throw error;
-        } finally {
-            if (client) {
-                client.release();
-            }
-        }
+        });
     }
 
     async beginTransaction() {

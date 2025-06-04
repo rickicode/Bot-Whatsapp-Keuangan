@@ -1213,6 +1213,43 @@ class DatabaseManager {
             };
         }
     }
+
+    // Pool monitoring and health check methods
+    async getPoolStats() {
+        if (this.db && typeof this.db.getPoolStats === 'function') {
+            return await this.db.getPoolStats();
+        }
+        return null;
+    }
+
+    async healthCheck() {
+        if (this.db && typeof this.db.healthCheck === 'function') {
+            return await this.db.healthCheck();
+        }
+        
+        // Fallback health check for non-PostgreSQL databases
+        try {
+            await this.get('SELECT 1');
+            return {
+                status: 'healthy',
+                timestamp: new Date().toISOString()
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            };
+        }
+    }
+
+    // Log pool statistics (useful for monitoring)
+    async logPoolStats() {
+        const stats = await this.getPoolStats();
+        if (stats) {
+            this.logger.info('Database pool stats:', stats);
+        }
+    }
 }
 
 module.exports = DatabaseManager;
