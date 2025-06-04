@@ -8,7 +8,7 @@ const {
     useMultiFileAuthState,
     isJidBroadcast,
     isJidGroup
-} = require('@whiskeysockets/baileys');
+} = require('baileys');
 const DatabaseManager = require('./database/DatabaseManager');
 const CommandHandler = require('./handlers/CommandHandler');
 const AIService = require('./services/AIService');
@@ -20,6 +20,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const cron = require('node-cron');
 const ReminderService = require('./services/ReminderService');
+const MessagingAPIService = require('./services/MessagingAPIService');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,6 +32,7 @@ class WhatsAppFinancialBot {
         this.aiService = null;
         this.indonesianAI = null;
         this.reminderService = null;
+        this.messagingAPI = null;
         this.logger = new Logger();
         this.antiSpam = new AntiSpamManager();
         this.app = express();
@@ -207,6 +209,228 @@ class WhatsAppFinancialBot {
             } catch (error) {
                 res.status(500).json({ error: error.message });
             }
+        });
+
+        // API endpoints for messaging
+        this.setupMessagingAPI();
+    }
+
+    setupMessagingAPI() {
+        // API Authentication middleware
+        const authenticateAPI = (req, res, next) => {
+            const apiKey = req.headers['x-api-key'] || req.query.api_key;
+            const validApiKey = process.env.API_KEY;
+            
+            if (!validApiKey) {
+                return res.status(500).json({
+                    error: 'API key not configured on server',
+                    code: 'API_KEY_NOT_CONFIGURED'
+                });
+            }
+            
+            if (!apiKey || apiKey !== validApiKey) {
+                return res.status(401).json({
+                    error: 'Invalid or missing API key',
+                    code: 'INVALID_API_KEY'
+                });
+            }
+            
+            next();
+        };
+
+        // Send single text message
+        this.app.post('/api/send-message', authenticateAPI, async (req, res) => {
+            try {
+                const { phoneNumber, message, options = {} } = req.body;
+
+                if (!phoneNumber || !message) {
+                    return res.status(400).json({
+                        error: 'Phone number and message are required',
+                        code: 'MISSING_PARAMETERS'
+                    });
+                }
+
+                if (!this.messagingAPI) {
+                    return res.status(503).json({
+                        error: 'Messaging service not available',
+                        code: 'SERVICE_UNAVAILABLE'
+                    });
+                }
+
+                const result = await this.messagingAPI.sendTextMessage(phoneNumber, message, options);
+                res.json(result);
+
+            } catch (error) {
+                this.logger.error('API send-message error:', error);
+                res.status(500).json({
+                    error: error.message,
+                    code: 'SEND_MESSAGE_FAILED'
+                });
+            }
+        });
+
+        // Send broadcast message
+        this.app.post('/api/send-broadcast', authenticateAPI, async (req, res) => {
+            try {
+                const { phoneNumbers, message, options = {} } = req.body;
+
+                if (!phoneNumbers || !Array.isArray(phoneNumbers) || !message) {
+                    return res.status(400).json({
+                        error: 'Phone numbers array and message are required',
+                        code: 'MISSING_PARAMETERS'
+                    });
+                }
+
+                if (phoneNumbers.length > 100) {
+                    return res.status(400).json({
+                        error: 'Maximum 100 phone numbers allowed per broadcast',
+                        code: 'TOO_MANY_RECIPIENTS'
+                    });
+                }
+
+                if (!this.messagingAPI) {
+                    return res.status(503).json({
+                        error: 'Messaging service not available',
+                        code: 'SERVICE_UNAVAILABLE'
+                    });
+                }
+
+                const result = await this.messagingAPI.sendBroadcastMessage(phoneNumbers, message, options);
+                res.json(result);
+
+            } catch (error) {
+                this.logger.error('API send-broadcast error:', error);
+                res.status(500).json({
+                    error: error.message,
+                    code: 'SEND_BROADCAST_FAILED'
+                });
+            }
+        });
+
+        // Webhook endpoint
+        this.app.post('/api/webhook', authenticateAPI, async (req, res) => {
+            try {
+                const { event, data } = req.body;
+
+                if (!event) {
+                    return res.status(400).json({
+                        error: 'Event type is required',
+                        code: 'MISSING_EVENT'
+                    });
+                }
+
+                if (!this.messagingAPI) {
+                    return res.status(503).json({
+                        error: 'Messaging service not available',
+                        code: 'SERVICE_UNAVAILABLE'
+                    });
+                }
+
+                const result = await this.messagingAPI.processWebhook(event, data, req.headers);
+                res.json(result);
+
+            } catch (error) {
+                this.logger.error('API webhook error:', error);
+                res.status(500).json({
+                    error: error.message,
+                    code: 'WEBHOOK_FAILED'
+                });
+            }
+        });
+
+        // Get message history
+        this.app.get('/api/message-history', authenticateAPI, (req, res) => {
+            try {
+                if (!this.messagingAPI) {
+                    return res.status(503).json({
+                        error: 'Messaging service not available',
+                        code: 'SERVICE_UNAVAILABLE'
+                    });
+                }
+
+                const filters = {
+                    phoneNumber: req.query.phoneNumber,
+                    type: req.query.type,
+                    since: req.query.since,
+                    limit: req.query.limit ? parseInt(req.query.limit) : undefined
+                };
+
+                const history = this.messagingAPI.getMessageHistory(filters);
+                res.json({
+                    success: true,
+                    count: history.length,
+                    history
+                });
+
+            } catch (error) {
+                this.logger.error('API message-history error:', error);
+                res.status(500).json({
+                    error: error.message,
+                    code: 'HISTORY_FAILED'
+                });
+            }
+        });
+
+        // Get API statistics
+        this.app.get('/api/stats', authenticateAPI, (req, res) => {
+            try {
+                if (!this.messagingAPI) {
+                    return res.status(503).json({
+                        error: 'Messaging service not available',
+                        code: 'SERVICE_UNAVAILABLE'
+                    });
+                }
+
+                const stats = this.messagingAPI.getAPIStats();
+                res.json({
+                    success: true,
+                    timestamp: new Date().toISOString(),
+                    ...stats
+                });
+
+            } catch (error) {
+                this.logger.error('API stats error:', error);
+                res.status(500).json({
+                    error: error.message,
+                    code: 'STATS_FAILED'
+                });
+            }
+        });
+
+        // Clear message history
+        this.app.post('/api/clear-history', authenticateAPI, (req, res) => {
+            try {
+                if (!this.messagingAPI) {
+                    return res.status(503).json({
+                        error: 'Messaging service not available',
+                        code: 'SERVICE_UNAVAILABLE'
+                    });
+                }
+
+                this.messagingAPI.clearHistory();
+                res.json({
+                    success: true,
+                    message: 'Message history cleared',
+                    timestamp: new Date().toISOString()
+                });
+
+            } catch (error) {
+                this.logger.error('API clear-history error:', error);
+                res.status(500).json({
+                    error: error.message,
+                    code: 'CLEAR_HISTORY_FAILED'
+                });
+            }
+        });
+
+        // Test API endpoint
+        this.app.get('/api/test', authenticateAPI, (req, res) => {
+            res.json({
+                success: true,
+                message: 'API is working',
+                timestamp: new Date().toISOString(),
+                version: '1.0.0'
+            });
         });
     }
 
@@ -412,6 +636,10 @@ class WhatsAppFinancialBot {
                         // Update connection status for web interface
                         this.isWhatsAppConnected = true;
                         this.currentQRCode = null;
+
+                        // Initialize messaging API service after WhatsApp connection is established
+                        this.messagingAPI = new MessagingAPIService(this.sock, this.antiSpam, this.db);
+                        this.logger.info('✅ Messaging API Service initialized');
                         
                         this.setupCronJobs();
                         this.setupPeriodicCleanup();

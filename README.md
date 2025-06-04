@@ -2,7 +2,7 @@
 
 A comprehensive WhatsApp bot for managing personal finances with AI-powered insights using DeepSeek API. Features intelligent user registration, subscription management, and advanced financial analysis through simple WhatsApp commands - all in Indonesian language.
 
-> 🚀 **MIGRATED TO BAILEYS**: This bot now uses [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys) for better performance, stability, and multi-device support. See [BAILEYS_MIGRATION.md](BAILEYS_MIGRATION.md) for details.
+> 🚀 **MIGRATED TO BAILEYS**: This bot now uses [`baileys`](https://github.com/WhiskeySockets/Baileys) for better performance, stability, and multi-device support. See [BAILEYS_MIGRATION.md](BAILEYS_MIGRATION.md) for details.
 
 ## 🌟 Features
 
@@ -39,7 +39,17 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 - 📱 **Multi-Currency Support** - Handle different currencies
 - 🔐 **Security** - Encrypted data storage and user authentication
 
-## 🚀 Quick Start
+### 🚀 NEW: REST API & Webhook Integration
+- 📡 **REST API** - Send WhatsApp messages via HTTP API
+- 🔗 **Webhook System** - Receive real-time notifications and triggers
+- 💳 **Payment Integration** - Automatic payment notifications
+- 📅 **Scheduled Reminders** - External reminder triggers
+- 🏦 **Bank Integration** - Auto-sync bank transactions
+- 📢 **Broadcast Messages** - Send to multiple recipients
+- 📊 **API Analytics** - Monitor usage and performance
+- 🔐 **API Security** - Secure authentication and rate limiting
+
+## � Quick Start
 
 ### Prerequisites
 - Node.js 16+ (untuk local development)
@@ -220,6 +230,147 @@ Just type naturally:
 "Received 500000 from client payment"
 "Bought groceries for 75000"
 ```
+
+## 📡 REST API & Webhook Integration
+
+WhatsApp Financial Bot kini dilengkapi dengan REST API powerful untuk integrasi eksternal dan sistem webhook untuk notifikasi real-time.
+
+### 🚀 API Quick Start
+
+1. **Setup API Key**
+```bash
+# Generate secure API key
+API_KEY=your_secret_api_key_32_characters_minimum
+```
+
+2. **Test Connectivity**
+```bash
+curl -X GET "http://localhost:3000/api/test" \
+  -H "X-API-Key: your_api_key_here"
+```
+
+3. **Send Message**
+```bash
+curl -X POST "http://localhost:3000/api/send-message" \
+  -H "X-API-Key: your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "6281234567890",
+    "message": "Halo dari API!"
+  }'
+```
+
+### 📋 Available API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/test` | GET | Test API connectivity |
+| `/api/send-message` | POST | Send single WhatsApp message |
+| `/api/send-broadcast` | POST | Send to multiple recipients |
+| `/api/webhook` | POST | Process webhook events |
+| `/api/message-history` | GET | Get message history |
+| `/api/stats` | GET | API usage statistics |
+| `/api/clear-history` | POST | Clear message history |
+
+### 🔗 Webhook Events
+
+| Event | Use Case | Description |
+|-------|----------|-------------|
+| `payment_notification` | E-commerce, Billing | Automatic payment updates |
+| `reminder_trigger` | CRM, Task Management | Scheduled reminders |
+| `user_action` | Automation | Trigger user actions |
+| `transaction_sync` | Banking | Auto-sync bank transactions |
+| `external_command` | Dashboard | Remote command execution |
+| `system_alert` | Monitoring | System notifications |
+
+### 💳 Use Case Examples
+
+**Payment Gateway Integration:**
+```javascript
+// Send payment notification via webhook
+await fetch('http://localhost:3000/api/webhook', {
+  method: 'POST',
+  headers: {
+    'X-API-Key': 'your_api_key',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    event: 'payment_notification',
+    data: {
+      phoneNumber: '6281234567890',
+      amount: 150000,
+      status: 'success',
+      transactionId: 'TRX123456'
+    }
+  })
+});
+```
+
+**Scheduled Reminders:**
+```javascript
+// Send reminder via webhook
+await fetch('http://localhost:3000/api/webhook', {
+  method: 'POST',
+  headers: {
+    'X-API-Key': 'your_api_key',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    event: 'reminder_trigger',
+    data: {
+      phoneNumber: '6281234567890',
+      reminderText: 'Jangan lupa bayar tagihan listrik!',
+      type: 'monthly'
+    }
+  })
+});
+```
+
+**Broadcast Messages:**
+```javascript
+// Send broadcast to multiple users
+await fetch('http://localhost:3000/api/send-broadcast', {
+  method: 'POST',
+  headers: {
+    'X-API-Key': 'your_api_key',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    phoneNumbers: ['6281234567890', '6281234567891'],
+    message: 'Sistem maintenance pada 25 Jan 2024',
+    options: { delay: 2000 }
+  })
+});
+```
+
+### 🔐 API Security & Rate Limiting
+
+- **Authentication**: Secure API key authentication
+- **Rate Limiting**: 10 messages/minute per user, 100/minute global
+- **Anti-Spam**: Built-in protection against WhatsApp bans
+- **Input Validation**: Comprehensive request validation
+- **Error Handling**: Detailed error responses with codes
+
+### 📊 Monitoring & Analytics
+
+```bash
+# Get real-time API statistics
+curl -X GET "http://localhost:3000/api/stats" \
+  -H "X-API-Key: your_api_key"
+
+# Response includes:
+# - Total messages sent/failed
+# - 24-hour and hourly statistics
+# - Connection status
+# - Webhook processing stats
+```
+
+### 📚 API Documentation
+
+- **[📖 Complete API Documentation](docs/API_DOCUMENTATION.md)** - Full API reference
+- **[🔗 Webhook Implementation Guide](docs/WEBHOOK_GUIDE.md)** - Webhook setup and examples
+- **[⚙️ API Setup Guide](docs/API_SETUP.md)** - Installation and configuration
+- **[🎯 API Overview](docs/API_OVERVIEW.md)** - Quick start and examples
 
 ## 🤖 AI Features
 
