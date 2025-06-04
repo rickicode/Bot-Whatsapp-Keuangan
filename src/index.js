@@ -9,7 +9,6 @@ const {
     isJidBroadcast,
     isJidGroup
 } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
 const DatabaseManager = require('./database/DatabaseManager');
 const CommandHandler = require('./handlers/CommandHandler');
 const AIService = require('./services/AIService');
@@ -48,7 +47,15 @@ class WhatsAppFinancialBot {
     }
 
     setupExpress() {
-        this.app.use(helmet());
+        this.app.use(helmet({
+            contentSecurityPolicy: {
+                directives: {
+                    ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+                    "script-src": ["'self'", "'unsafe-inline'"],
+                    "script-src-attr": ["'unsafe-inline'"],
+                },
+            },
+        }));
         this.app.use(cors());
         this.app.use(express.json());
         
@@ -70,11 +77,11 @@ class WhatsAppFinancialBot {
         });
 
         // QR Code routes
-        this.app.get('/qrcode', (req, res) => {
+        this.app.get('/qrscan', (req, res) => {
             res.sendFile(path.join(__dirname, 'public', 'qrcode.html'));
         });
 
-        this.app.get('/qrcode/status', (req, res) => {
+        this.app.get('/qrscan/status', (req, res) => {
             res.json({
                 qr: this.currentQRCode,
                 connected: this.isWhatsAppConnected,
@@ -82,7 +89,7 @@ class WhatsAppFinancialBot {
             });
         });
 
-        this.app.post('/qrcode/refresh', (req, res) => {
+        this.app.post('/qrscan/refresh', (req, res) => {
             this.currentQRCode = null;
             this.isWhatsAppConnected = false;
             this.logger.info('QR Code refresh requested');
@@ -253,10 +260,7 @@ class WhatsAppFinancialBot {
                     const { connection, lastDisconnect, qr } = update;
 
                     if (qr) {
-                        this.logger.info('📱 QR Code generated for WhatsApp login');
-                        
-                        // Show QR in terminal (backup)
-                        qrcode.generate(qr, { small: true });
+                        this.logger.info('📱 QR Code generated. Scan with WhatsApp:');
                         
                         // Convert QR to base64 for web service
                         const QRCode = require('qrcode');
@@ -266,8 +270,13 @@ class WhatsAppFinancialBot {
                             this.currentQRCode = base64Data;
                             this.isWhatsAppConnected = false;
                             
-                            const port = process.env.PORT || 3000;
-                            this.logger.info(`🌐 QR Code available at: http://localhost:${port}/qrcode`);
+                            // Display full URL with domain
+                            const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+                            const qrUrl = `${baseUrl}/qrscan`;
+                            
+                            this.logger.info(`🌐 QR Code available at: ${qrUrl}`);
+                            this.logger.info(`📱 Open this URL in your browser to scan QR code:`);
+                            this.logger.info(`   ${qrUrl}`);
                         } catch (qrError) {
                             this.logger.error('Error generating QR for web:', qrError);
                         }

@@ -174,7 +174,7 @@
             🔄 Menunggu koneksi WhatsApp...
         </div>
         
-        <button class="refresh-btn" onclick="refreshQR()">🔄 Refresh QR Code</button>
+        <button class="refresh-btn" id="refresh-btn">🔄 Refresh QR Code</button>
         
         <div class="instructions">
             <h3>📱 Cara Scan QR Code:</h3>
@@ -200,7 +200,7 @@
         function updateQRCode() {
             if (isConnected) return;
             
-            fetch('/qrcode/status')
+            fetch('/qrscan/status')
                 .then(response => response.json())
                 .then(data => {
                     const qrContent = document.getElementById('qr-content');
@@ -239,7 +239,7 @@
             const qrContent = document.getElementById('qr-content');
             qrContent.innerHTML = '<div class="loading">🔄 Memuat ulang QR code...</div>';
             
-            fetch('/qrcode/refresh', { method: 'POST' })
+            fetch('/qrscan/refresh', { method: 'POST' })
                 .then(() => {
                     setTimeout(updateQRCode, 1000);
                 })
@@ -250,6 +250,9 @@
         
         // Auto-update setiap 5 detik
         setInterval(updateQRCode, 5000);
+        
+        // Add event listener for refresh button
+        document.getElementById('refresh-btn').addEventListener('click', refreshQR);
         
         // Initial load
         updateQRCode();
