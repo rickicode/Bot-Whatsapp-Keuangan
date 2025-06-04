@@ -87,8 +87,11 @@ docker run -d \
 # Check status semua services
 npm run easypanel:status
 
-# Lihat logs
+# Lihat logs (semua services dalam satu output)
 npm run easypanel:logs
+
+# Lihat logs secara real-time
+docker logs -f whatsapp-bot-easypanel
 
 # Health check
 curl http://localhost:3000/health

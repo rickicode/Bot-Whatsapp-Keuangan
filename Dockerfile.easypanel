@@ -76,9 +76,12 @@ COPY <<EOF /etc/supervisord.conf
 [supervisord]
 nodaemon=true
 user=root
-logfile=/var/log/supervisor/supervisord.log
+logfile=/dev/stdout
+logfile_maxbytes=0
 pidfile=/var/run/supervisord.pid
 childlogdir=/var/log/supervisor
+silent=false
+loglevel=info
 
 [unix_http_server]
 file=/var/run/supervisor.sock
@@ -97,59 +100,66 @@ directory=/app
 user=botuser
 autostart=true
 autorestart=true
+autorestart_delay=10
+startretries=5
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/whatsapp-bot.log
-stdout_logfile_maxbytes=10MB
-stdout_logfile_backups=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 environment=NODE_ENV=production,NODE_OPTIONS="--max-old-space-size=384 --gc-interval=100"
 
 # Anti-spam Monitor (lightweight)
 [program:antispam-monitor]
-command=bash -c "sleep 60 && while true; do node scripts/anti-spam-monitor.js stats >/dev/null 2>&1 || echo 'Monitor check failed'; sleep 300; done"
+command=bash -c "sleep 60 && while true; do echo '[ANTISPAM] Running check at \$(date)'; node scripts/anti-spam-monitor.js stats || echo '[ANTISPAM] Monitor check failed'; sleep 300; done"
 directory=/app
 user=botuser
 autostart=true
 autorestart=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/antispam-monitor.log
-stdout_logfile_maxbytes=2MB
-stdout_logfile_backups=2
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 
 # Session Cleanup Service
 [program:session-cleanup]
-command=bash -c "sleep 120 && while true; do node scripts/cleanup-sessions.js cleanup >/dev/null 2>&1 || echo 'Cleanup failed'; sleep 600; done"
+command=bash -c "sleep 120 && while true; do echo '[CLEANUP] Running cleanup at \$(date)'; node scripts/cleanup-sessions.js cleanup || echo '[CLEANUP] Cleanup failed'; sleep 600; done"
 directory=/app
 user=botuser
 autostart=true
-autirestart=true
+autorestart=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/session-cleanup.log
-stdout_logfile_maxbytes=2MB
-stdout_logfile_backups=2
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 
 # Health Monitor (minimal for EasyPanel)
 [program:health-monitor]
-command=bash -c "sleep 90 && while true; do if curl -sf http://localhost:3000/health >/dev/null; then echo 'Health OK'; else echo 'Health check failed'; fi; sleep 300; done"
+command=bash -c "sleep 90 && while true; do if curl -sf http://localhost:3000/health >/dev/null; then echo '[HEALTH] OK at \$(date)'; else echo '[HEALTH] Failed at \$(date)'; fi; sleep 300; done"
 directory=/app
 user=botuser
 autostart=true
 autorestart=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/health-monitor.log
-stdout_logfile_maxbytes=1MB
-stdout_logfile_backups=1
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 
 # Log Rotator (minimal cleanup for EasyPanel)
 [program:log-rotator]
-command=bash -c "while true; do find /app/logs -name '*.log' -size +30M -delete 2>/dev/null || true; find /var/log/supervisor -name '*.log' -mtime +3 -delete 2>/dev/null || true; sleep 7200; done"
+command=bash -c "while true; do echo '[LOGROTATE] Running cleanup at \$(date)'; find /app/logs -name '*.log' -size +30M -delete 2>/dev/null || true; find /var/log/supervisor -name '*.log' -mtime +3 -delete 2>/dev/null || true; sleep 7200; done"
 directory=/app
 user=botuser
 autostart=true
 autorestart=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/log-rotator.log
-stdout_logfile_maxbytes=500KB
-stdout_logfile_backups=1
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 EOF
 
 # Create minimal health check script for EasyPanel
@@ -211,8 +221,10 @@ echo "Services that will be started:"
 echo "  - WhatsApp Bot (main application)"
 echo "  - Anti-spam Monitor (every 5 minutes)"  
 echo "  - Session Cleanup (every 10 minutes)"
-echo "  - Health Monitor (every 3 minutes)"
-echo "  - Log Rotator (every hour)"
+echo "  - Health Monitor (every 5 minutes)"
+echo "  - Log Rotator (every 2 hours)"
+echo ""
+echo "📋 All logs will be displayed in Docker logs"
 
 exec supervisord -c /etc/supervisord.conf
 EOF
@@ -230,15 +242,12 @@ echo "🔍 Process Status:"
 ps aux | grep -E "(supervisord|node|cleanup|monitor)" | grep -v grep
 
 echo ""
-echo "📝 Recent Logs:"
-echo "=== Main Bot ==="
-tail -5 /var/log/supervisor/whatsapp-bot.log 2>/dev/null || echo "No bot logs yet"
-
-echo "=== Monitor ==="  
-tail -3 /var/log/supervisor/antispam-monitor.log 2>/dev/null || echo "No monitor logs yet"
-
-echo "=== Cleanup ==="
-tail -3 /var/log/supervisor/session-cleanup.log 2>/dev/null || echo "No cleanup logs yet"
+echo "📝 Recent Application Logs:"
+echo "Check Docker logs for all service output:"
+echo "  docker logs whatsapp-bot-easypanel"
+echo ""
+echo "Or use NPM command:"
+echo "  npm run easypanel:logs"
 EOF
 
 RUN chmod +x /usr/local/bin/supervisor-status.sh
@@ -247,7 +256,7 @@ RUN chmod +x /usr/local/bin/supervisor-status.sh
 RUN chown -R botuser:nodejs /app
 
 # Health check configuration for EasyPanel
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=60s --timeout=15s --start-period=120s --retries=3 \
     CMD ["/usr/local/bin/healthcheck.sh"]
 
 # Set environment variables optimized for single container
