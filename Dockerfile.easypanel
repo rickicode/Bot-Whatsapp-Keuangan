@@ -67,6 +67,8 @@ COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/healthcheck.sh /usr/local/bin/healthcheck.sh
 COPY docker/start-easypanel.sh /usr/local/bin/start-easypanel.sh
 COPY docker/supervisor-status.sh /usr/local/bin/supervisor-status.sh
+COPY docker/create-env-from-docker.sh /usr/local/bin/create-env-from-docker.sh
+COPY docker/.env.template /app/.env.template
 
 # Create directories with proper permissions
 RUN mkdir -p data data/sessions logs backups tmp /var/log/supervisor && \
@@ -77,7 +79,8 @@ RUN mkdir -p data data/sessions logs backups tmp /var/log/supervisor && \
 RUN find scripts -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true && \
     chmod +x /usr/local/bin/healthcheck.sh && \
     chmod +x /usr/local/bin/start-easypanel.sh && \
-    chmod +x /usr/local/bin/supervisor-status.sh
+    chmod +x /usr/local/bin/supervisor-status.sh && \
+    chmod +x /usr/local/bin/create-env-from-docker.sh
 
 # Create .env from environment variables
 RUN node scripts/create-env.js || echo "Warning: Could not create .env file"

@@ -11,8 +11,10 @@ echo "👤 Running as: Multi-user (supervisord + botuser)"
 # Environment check
 echo "🔧 Checking environment..."
 if [ ! -f ".env" ]; then
-    echo "⚠️ No .env file found, creating from environment variables..."
-    node scripts/create-env.js || echo "Warning: Could not create .env"
+    echo "⚠️ No .env file found, creating from Docker environment variables..."
+    /usr/local/bin/create-env-from-docker.sh || echo "Warning: Could not create .env"
+else
+    echo "✅ .env file already exists"
 fi
 
 # Note: Using Supabase - no local database test needed
