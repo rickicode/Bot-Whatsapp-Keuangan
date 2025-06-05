@@ -23,40 +23,40 @@ class AntiSpamManager {
         
         // Configuration
         this.config = {
-            // Per user limits
-            maxMessagesPerMinute: parseInt(process.env.ANTI_SPAM_USER_PER_MINUTE) || 8,
-            maxMessagesPerHour: parseInt(process.env.ANTI_SPAM_USER_PER_HOUR) || 60,
-            maxDuplicateMessages: parseInt(process.env.ANTI_SPAM_MAX_DUPLICATES) || 2,
+            // Per user limits - RELAXED FOR HIGH VOLUME
+            maxMessagesPerMinute: parseInt(process.env.ANTI_SPAM_USER_PER_MINUTE) || 15,
+            maxMessagesPerHour: parseInt(process.env.ANTI_SPAM_USER_PER_HOUR) || 200,
+            maxDuplicateMessages: parseInt(process.env.ANTI_SPAM_MAX_DUPLICATES) || 5,
             
-            // Global limits (to prevent WhatsApp ban) - more conservative
-            maxGlobalMessagesPerMinute: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_MINUTE) || 30,
-            maxGlobalMessagesPerHour: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_HOUR) || 600,
-            maxGlobalMessagesPerDay: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_DAY) || 8000,
+            // Global limits (to prevent WhatsApp ban) - RELAXED FOR HIGH VOLUME
+            maxGlobalMessagesPerMinute: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_MINUTE) || 100,
+            maxGlobalMessagesPerHour: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_HOUR) || 3000,
+            maxGlobalMessagesPerDay: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_DAY) || 50000,
             
-            // Spam detection
-            duplicateMessageWindow: parseInt(process.env.ANTI_SPAM_DUPLICATE_WINDOW) || 120000, // 2 minutes
-            rapidFireThreshold: parseInt(process.env.ANTI_SPAM_RAPID_FIRE) || 3, // 3 messages in 10 seconds
+            // Spam detection - RELAXED FOR HIGH VOLUME
+            duplicateMessageWindow: parseInt(process.env.ANTI_SPAM_DUPLICATE_WINDOW) || 300000, // 5 minutes
+            rapidFireThreshold: parseInt(process.env.ANTI_SPAM_RAPID_FIRE) || 10, // 10 messages in 10 seconds
             rapidFireWindow: parseInt(process.env.ANTI_SPAM_RAPID_FIRE_WINDOW) || 10000, // 10 seconds
             
-            // Cooldown periods
-            userCooldownMinutes: parseInt(process.env.ANTI_SPAM_USER_COOLDOWN) || 3,
-            globalCooldownMinutes: parseInt(process.env.ANTI_SPAM_GLOBAL_COOLDOWN) || 5,
+            // Cooldown periods - SHORTER FOR HIGH VOLUME
+            userCooldownMinutes: parseInt(process.env.ANTI_SPAM_USER_COOLDOWN) || 1,
+            globalCooldownMinutes: parseInt(process.env.ANTI_SPAM_GLOBAL_COOLDOWN) || 2,
             
-            // Emergency brake
+            // Emergency brake - HIGHER THRESHOLD FOR HIGH VOLUME
             emergencyBrakeEnabled: process.env.ANTI_SPAM_EMERGENCY_BRAKE !== 'false',
-            emergencyBrakeThreshold: parseInt(process.env.ANTI_SPAM_EMERGENCY_THRESHOLD) || 50, // messages per minute
+            emergencyBrakeThreshold: parseInt(process.env.ANTI_SPAM_EMERGENCY_THRESHOLD) || 200, // messages per minute
             
             // Anti-banned features
             enableBanRiskDetection: process.env.ANTI_BANNED_DETECTION !== 'false',
             enableNaturalDelays: process.env.ANTI_BANNED_NATURAL_DELAYS !== 'false',
             enableResponseVariation: process.env.ANTI_BANNED_RESPONSE_VARIATION !== 'false',
             
-            // Ban risk thresholds
+            // Ban risk thresholds - RELAXED FOR HIGH VOLUME
             banRiskThresholds: {
-                suspiciousPatternCount: parseInt(process.env.BAN_RISK_PATTERN_COUNT) || 5,
-                rapidResponseCount: parseInt(process.env.BAN_RISK_RAPID_RESPONSE) || 10,
-                identicalResponseCount: parseInt(process.env.BAN_RISK_IDENTICAL_RESPONSE) || 3,
-                maxHourlyMessages: parseInt(process.env.BAN_RISK_HOURLY_MAX) || 400
+                suspiciousPatternCount: parseInt(process.env.BAN_RISK_PATTERN_COUNT) || 15, // Increased from 5
+                rapidResponseCount: parseInt(process.env.BAN_RISK_RAPID_RESPONSE) || 25, // Increased from 10
+                identicalResponseCount: parseInt(process.env.BAN_RISK_IDENTICAL_RESPONSE) || 8, // Increased from 3
+                maxHourlyMessages: parseInt(process.env.BAN_RISK_HOURLY_MAX) || 800 // Increased from 400
             },
             
             // Natural behavior simulation - FASTER SETTINGS
@@ -233,31 +233,31 @@ class AntiSpamManager {
         const stats = this.getDetailedStats();
         let riskScore = 0;
         
-        // Factor 1: Message volume
-        if (stats.global.messagesPerMinute > 40) riskScore += 3;
-        else if (stats.global.messagesPerMinute > 25) riskScore += 2;
-        else if (stats.global.messagesPerMinute > 15) riskScore += 1;
+        // Factor 1: Message volume - RELAXED FOR HIGH VOLUME
+        if (stats.global.messagesPerMinute > 80) riskScore += 3; // Increased from 40
+        else if (stats.global.messagesPerMinute > 60) riskScore += 2; // Increased from 25
+        else if (stats.global.messagesPerMinute > 40) riskScore += 1; // Increased from 15
         
-        if (stats.global.messagesPerHour > 500) riskScore += 3;
-        else if (stats.global.messagesPerHour > 300) riskScore += 2;
-        else if (stats.global.messagesPerHour > 200) riskScore += 1;
+        if (stats.global.messagesPerHour > 1500) riskScore += 3; // Increased from 500
+        else if (stats.global.messagesPerHour > 1000) riskScore += 2; // Increased from 300
+        else if (stats.global.messagesPerHour > 600) riskScore += 1; // Increased from 200
         
-        // Factor 2: Suspicious patterns
+        // Factor 2: Suspicious patterns - RELAXED
         const suspiciousUsers = Array.from(this.suspiciousPatterns.values())
             .reduce((total, patterns) => total + patterns.length, 0);
-        if (suspiciousUsers > 20) riskScore += 3;
-        else if (suspiciousUsers > 10) riskScore += 2;
-        else if (suspiciousUsers > 5) riskScore += 1;
+        if (suspiciousUsers > 100) riskScore += 3; // Increased from 20
+        else if (suspiciousUsers > 50) riskScore += 2; // Increased from 10
+        else if (suspiciousUsers > 25) riskScore += 1; // Increased from 5
         
-        // Factor 3: Rapid fire incidents
+        // Factor 3: Rapid fire incidents - RELAXED
         const rapidFireUsers = Array.from(this.userLimits.values())
             .filter(limit => limit.rapidFireIncidents > 0).length;
-        if (rapidFireUsers > 5) riskScore += 2;
-        else if (rapidFireUsers > 2) riskScore += 1;
+        if (rapidFireUsers > 20) riskScore += 2; // Increased from 5
+        else if (rapidFireUsers > 10) riskScore += 1; // Increased from 2
         
-        // Factor 4: Emergency brake triggers
-        if (this.globalStats.emergencyBrakeCount > 3) riskScore += 4;
-        else if (this.globalStats.emergencyBrakeCount > 1) riskScore += 2;
+        // Factor 4: Emergency brake triggers - RELAXED
+        if (this.globalStats.emergencyBrakeCount > 10) riskScore += 4; // Increased from 3
+        else if (this.globalStats.emergencyBrakeCount > 5) riskScore += 2; // Increased from 1
         
         // Determine risk level
         const previousRisk = this.banRiskLevel;
@@ -306,23 +306,26 @@ class AntiSpamManager {
             });
         }
         
-        // Pattern 2: Responses too fast (less than human reading time)
+        // Pattern 2: Responses too fast (less than human reading time) - RELAXED
         if (userLimit && userLimit.lastMessageTime) {
             const timeSinceLastMessage = now - userLimit.lastMessageTime;
             const minimumReadingTime = messageText.length * this.config.naturalDelays.readingTimePerChar;
             
-            if (timeSinceLastMessage < minimumReadingTime + this.config.naturalDelays.thinkingTime) {
+            // Only flag if response is EXTREMELY fast (less than 100ms)
+            if (timeSinceLastMessage < 100) {
                 patterns.push({
                     type: 'too_fast_response',
                     responseTime: timeSinceLastMessage,
-                    expectedMinimum: minimumReadingTime + this.config.naturalDelays.thinkingTime,
+                    expectedMinimum: 100,
                     timestamp: now
                 });
             }
         }
         
-        // Pattern 3: Too consistent response times
-        if (recentMessages.length >= 5) {
+        // Pattern 3: Too consistent response times - DISABLED FOR HIGH VOLUME
+        // Commented out to reduce false positives in high-volume scenarios
+        /*
+        if (recentMessages.length >= 10) { // Increased threshold from 5 to 10
             const responseTimes = [];
             for (let i = 1; i < recentMessages.length; i++) {
                 responseTimes.push(recentMessages[i].timestamp - recentMessages[i-1].timestamp);
@@ -332,8 +335,8 @@ class AntiSpamManager {
             const variance = responseTimes.reduce((sum, time) => sum + Math.pow(time - avgResponseTime, 2), 0) / responseTimes.length;
             const stdDev = Math.sqrt(variance);
             
-            // If responses are too consistent (low variance), it's suspicious
-            if (stdDev < avgResponseTime * 0.2 && avgResponseTime < 10000) { // Less than 20% variation and under 10s avg
+            // Much more relaxed variance check - only extremely consistent patterns
+            if (stdDev < avgResponseTime * 0.05 && avgResponseTime < 1000) { // 5% variation and under 1s avg
                 patterns.push({
                     type: 'consistent_timing',
                     avgResponseTime,
@@ -342,6 +345,7 @@ class AntiSpamManager {
                 });
             }
         }
+        */
         
         // Clean old patterns (keep only last hour)
         const validPatterns = patterns.filter(pattern => now - pattern.timestamp < 3600000);
