@@ -36,6 +36,7 @@ class WhatsAppFinancialBot {
         this.logger = new Logger();
         this.antiSpam = new AntiSpamManager();
         this.app = express();
+        this.processedMessages = new Set(); // Track processed messages to prevent duplicates
         this.setupExpress();
         this.ensureDataDirectories();
     }
@@ -551,10 +552,37 @@ class WhatsAppFinancialBot {
         }
     }
 
+    async clearSessionData() {
+        // Clear session files when device is unlinked (401 error)
+        const sessionPath = './data/sessions';
+        try {
+            if (fs.existsSync(sessionPath)) {
+                const files = fs.readdirSync(sessionPath);
+                for (const file of files) {
+                    const filePath = path.join(sessionPath, file);
+                    fs.unlinkSync(filePath);
+                }
+                this.logger.info('🧹 Cleared session data due to device unlink');
+            }
+        } catch (error) {
+            this.logger.error('Error clearing session data:', error);
+        }
+    }
+
     async connectToBaileys() {
         // Reset connection status when initializing connection
         this.isWhatsAppConnected = false;
         this.currentQRCode = null;
+        
+        // Clean up existing socket if any
+        if (this.sock) {
+            try {
+                this.sock.ev.removeAllListeners();
+                this.sock.end();
+            } catch (error) {
+                this.logger.warn('Error cleaning up existing socket:', error.message);
+            }
+        }
         
         const { state, saveCreds } = await useMultiFileAuthState('./data/sessions');
         
@@ -587,86 +615,98 @@ class WhatsAppFinancialBot {
         // Initialize command handler with the socket
         this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock);
 
-        this.sock.ev.process(
-            async (events) => {
-                // Connection updates
-                if (events['connection.update']) {
-                    const update = events['connection.update'];
-                    const { connection, lastDisconnect, qr } = update;
-
-                    if (qr) {
-                        this.logger.info('📱 QR Code generated. Scan with WhatsApp:');
-                        
-                        // Convert QR to base64 for web service
-                        const QRCode = require('qrcode');
-                        try {
-                            const qrBase64 = await QRCode.toDataURL(qr);
-                            const base64Data = qrBase64.replace(/^data:image\/png;base64,/, '');
-                            this.currentQRCode = base64Data;
-                            this.isWhatsAppConnected = false;
-                            
-                            // Display full URL with domain
-                            const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-                            const qrUrl = `${baseUrl}/qrscan`;
-                            
-                            this.logger.info(`🌐 QR Code available at: ${qrUrl}`);
-                            this.logger.info(`📱 Open this URL in your browser to scan QR code:`);
-                            this.logger.info(`   ${qrUrl}`);
-                        } catch (qrError) {
-                            this.logger.error('Error generating QR for web:', qrError);
-                        }
-                    }
-
-                    if (connection === 'close') {
-                        // Reset connection status when closed
-                        this.isWhatsAppConnected = false;
-                        this.currentQRCode = null;
-                        
-                        // Reconnect if not logged out
-                        const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-                        this.logger.info('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
-                        
-                        if (shouldReconnect) {
-                            await this.connectToBaileys();
-                        }
-                    } else if (connection === 'open') {
-                        this.logger.info('✅ WhatsApp connection opened successfully');
-                        this.logger.info(`📱 Bot Name: ${process.env.BOT_NAME || 'Financial Manager Bot'}`);
-                        
-                        // Update connection status for web interface
-                        this.isWhatsAppConnected = true;
-                        this.currentQRCode = null;
-
-                        // Initialize messaging API service after WhatsApp connection is established
-                        this.messagingAPI = new MessagingAPIService(this.sock, this.antiSpam, this.db);
-                        this.logger.info('✅ Messaging API Service initialized');
-                        
-                        this.setupCronJobs();
-                        this.setupPeriodicCleanup();
-                    } else if (connection === 'connecting') {
-                        this.logger.info('🔄 WhatsApp is connecting...');
-                        this.isWhatsAppConnected = false;
-                    }
-                }
-
-                // Save credentials
-                if (events['creds.update']) {
-                    await saveCreds();
-                }
-
-                // Handle messages
-                if (events['messages.upsert']) {
-                    const upsert = events['messages.upsert'];
-                    
-                    if (upsert.type === 'notify') {
-                        for (const msg of upsert.messages) {
-                            await this.handleMessage(msg);
-                        }
-                    }
+        // Use a single event listener to avoid duplicates
+        this.sock.ev.on('connection.update', async (update) => {
+            await this.handleConnectionUpdate(update);
+        });
+        
+        this.sock.ev.on('creds.update', async () => {
+            await saveCreds();
+        });
+        
+        this.sock.ev.on('messages.upsert', async (upsert) => {
+            if (upsert.type === 'notify') {
+                for (const msg of upsert.messages) {
+                    await this.handleMessage(msg);
                 }
             }
-        );
+        });
     }
+
+    async handleConnectionUpdate(update) {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            this.logger.info('📱 QR Code generated. Scan with WhatsApp:');
+            
+            // Convert QR to base64 for web service
+            const QRCode = require('qrcode');
+            try {
+                const qrBase64 = await QRCode.toDataURL(qr);
+                const base64Data = qrBase64.replace(/^data:image\/png;base64,/, '');
+                this.currentQRCode = base64Data;
+                this.isWhatsAppConnected = false;
+                
+                // Display full URL with domain
+                const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+                const qrUrl = `${baseUrl}/qrscan`;
+                
+                this.logger.info(`🌐 QR Code available at: ${qrUrl}`);
+                this.logger.info(`📱 Open this URL in your browser to scan QR code:`);
+                this.logger.info(`   ${qrUrl}`);
+            } catch (qrError) {
+                this.logger.error('Error generating QR for web:', qrError);
+            }
+        }
+
+        if (connection === 'close') {
+            // Reset connection status when closed
+            this.isWhatsAppConnected = false;
+            this.currentQRCode = null;
+            
+            const error = lastDisconnect?.error;
+            const statusCode = error?.output?.statusCode;
+            
+            // Check if device was unlinked (401 Unauthorized)
+            if (statusCode === 401) {
+                this.logger.warn('🔓 Device unlinked detected (401 error) - clearing session data');
+                await this.clearSessionData();
+                // Force QR code regeneration by reconnecting
+                this.logger.info('♻️ Reconnecting to generate new QR code...');
+                setTimeout(() => this.connectToBaileys(), 2000);
+                return;
+            }
+            
+            // Handle other disconnection reasons
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            this.logger.info('Connection closed due to ', error, ', reconnecting ', shouldReconnect);
+            
+            if (shouldReconnect) {
+                // Add delay before reconnecting to avoid rapid reconnection loops
+                setTimeout(() => this.connectToBaileys(), 5000);
+            }
+        } else if (connection === 'open') {
+            const botName = process.env.BOT_NAME || 'Financial Manager Bot';
+            this.logger.info('✅ WhatsApp connection opened successfully');
+            this.logger.info(`🤖 ${botName} is now ready to serve!`);
+            this.logger.info(`📱 Session: ${this.sock.user?.id || 'Unknown'}`);
+            
+            // Update connection status for web interface
+            this.isWhatsAppConnected = true;
+            this.currentQRCode = null;
+
+            // Initialize messaging API service after WhatsApp connection is established
+            this.messagingAPI = new MessagingAPIService(this.sock, this.antiSpam, this.db);
+            this.logger.info('✅ Messaging API Service initialized');
+            
+            this.setupCronJobs();
+            this.setupPeriodicCleanup();
+        } else if (connection === 'connecting') {
+            this.logger.info('🔄 WhatsApp is connecting...');
+            this.isWhatsAppConnected = false;
+        }
+    }
+
 
     async handleMessage(message) {
         // Skip if message is from status broadcast
@@ -684,6 +724,27 @@ class WhatsAppFinancialBot {
             // This is a message sent by the bot, don't process it
             return;
         }
+
+        // Create unique message ID to prevent duplicate processing
+        const messageId = `${message.key.remoteJid}_${message.key.id}_${message.messageTimestamp || Date.now()}`;
+        
+        // Check if we've already processed this message
+        if (this.processedMessages.has(messageId)) {
+            this.logger.debug(`Skipping duplicate message: ${messageId}`);
+            return; // Skip duplicate message
+        }
+        
+        // Add to processed messages set
+        this.processedMessages.add(messageId);
+        
+        // Clean up old processed messages (keep only last 1000)
+        if (this.processedMessages.size > 1000) {
+            const messagesToDelete = Array.from(this.processedMessages).slice(0, 500);
+            messagesToDelete.forEach(id => this.processedMessages.delete(id));
+        }
+        
+        // Log message details for debugging
+        this.logger.debug(`Processing message ID: ${messageId}`);
 
         // Extract message text
         const messageText = this.getMessageText(message);
@@ -908,6 +969,12 @@ process.on('SIGTERM', async () => {
         await global.bot.shutdown();
     }
 });
+
+// Ensure single instance and prevent multiple startups
+if (global.bot) {
+    console.warn('⚠️ Bot instance already exists, preventing duplicate startup');
+    process.exit(0);
+}
 
 // Start the bot
 const bot = new WhatsAppFinancialBot();

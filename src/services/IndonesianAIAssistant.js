@@ -54,9 +54,11 @@ class IndonesianAIAssistant {
     }
 
     async handleUnregisteredUser(message, userPhone, messageText) {
+        const botName = process.env.BOT_NAME || 'Bot Keuangan';
+        
         // Start registration process
         await message.reply(
-            '👋 Selamat datang di Bot Keuangan!\n\n' +
+            `👋 Selamat datang di ${botName}!\n\n` +
             'Untuk menggunakan bot keuangan ini, Anda perlu mendaftar terlebih dahulu.\n\n' +
             '📝 Mari kita mulai dengan mendaftar akun Anda.'
         );
@@ -183,7 +185,7 @@ class IndonesianAIAssistant {
                 `🏙️ Kota: ${city}\n\n` +
                 '💎 *Plan Anda:* Free Plan\n' +
                 '📊 Limit transaksi: 50/hari\n\n' +
-                '🚀 *Selamat datang di Bot Keuangan!*\n' +
+                `🚀 *Selamat datang di ${process.env.BOT_NAME || 'Bot Keuangan'}!*\n` +
                 'Ketik /menu untuk mulai menggunakan fitur-fitur bot.'
             );
             
@@ -281,9 +283,11 @@ class IndonesianAIAssistant {
         // Check if user is admin
         const isAdmin = await this.db.isUserAdmin(user.phone);
         const adminBadge = isAdmin ? ' 👑' : '';
+        const botName = process.env.BOT_NAME || 'Bot Keuangan';
         
         await message.reply(
             `${greeting} ${user.name}${adminBadge}! 👋\n\n` +
+            `🤖 Saya ${botName}, asisten keuangan Anda\n` +
             `💎 Plan: ${subscription.display_name}\n` +
             `📊 Sisa transaksi hari ini: ${remaining}${subscription.monthly_transaction_limit ? `/${subscription.monthly_transaction_limit}` : ''}\n` +
             (isAdmin ? '👑 Status: Administrator\n' : '') +

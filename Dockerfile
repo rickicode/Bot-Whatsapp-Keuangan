@@ -39,11 +39,10 @@ COPY . .
 RUN mkdir -p /app/data /app/logs /app/backups /app/exports && \
     chmod 755 /app/data /app/logs /app/backups /app/exports
 
-# Ensure logs directory is writable and create symlinks for Docker logging
-RUN ln -sf /dev/stdout /app/logs/app.log && \
-    ln -sf /dev/stderr /app/logs/error.log
+# Don't create symlinks to avoid double logging
+# The application will log directly to stdout/stderr
 
-# Create cron job files
+# Create cron job files (redirect to separate log files, not stdout)
 RUN echo "*/5 * * * * cd /app && /usr/local/bin/node scripts/cleanup-sessions.js cleanup >> /app/logs/cron-cleanup.log 2>&1" > /etc/cron.d/session-cleanup && \
     echo "*/2 * * * * cd /app && /usr/local/bin/node scripts/anti-spam-monitor.js stats >> /app/logs/cron-antispam.log 2>&1" > /etc/cron.d/anti-spam && \
     chmod 0644 /etc/cron.d/session-cleanup && \

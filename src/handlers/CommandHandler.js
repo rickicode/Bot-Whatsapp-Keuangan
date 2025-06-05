@@ -665,7 +665,9 @@ class CommandHandler {
 
     // Help - Main Menu
     async handleMainMenu(message, userPhone, args) {
-        const menuText = `🤖 *Bot Keuangan WhatsApp - Menu Utama*
+        const botName = process.env.BOT_NAME || 'Bot Keuangan';
+        
+        const menuText = `🤖 *${botName} - Menu Utama*
 
 📚 *PANDUAN BANTUAN:*
 
@@ -696,7 +698,9 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 
     // Help - Basic Commands
     async handleHelp(message, userPhone, args) {
-        const helpText = `📋 *Bot Keuangan - Panduan Perintah Dasar*
+        const botName = process.env.BOT_NAME || 'Bot Keuangan';
+        
+        const helpText = `📋 *${botName} - Panduan Perintah Dasar*
 
 💰 *TAMBAH TRANSAKSI:*
 
@@ -749,7 +753,9 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 
     // Help - AI Features
     async handleAIHelp(message, userPhone, args) {
-        const aiHelpText = `🤖 *Bot Keuangan - Panduan Fitur AI*
+        const botName = process.env.BOT_NAME || 'Bot Keuangan';
+        
+        const aiHelpText = `🤖 *${botName} - Panduan Fitur AI*
 
 💬 *CHAT DENGAN AI:*
 
@@ -836,7 +842,9 @@ Bot akan tampilkan menu kategori untuk dipilih!
 
     // Examples
     async handleExamples(message, userPhone, args) {
-        const examplesText = `📝 *Contoh Penggunaan Bot Keuangan*
+        const botName = process.env.BOT_NAME || 'Bot Keuangan';
+        
+        const examplesText = `📝 *Contoh Penggunaan ${botName}*
 
 💰 *CONTOH PEMASUKAN:*
 
