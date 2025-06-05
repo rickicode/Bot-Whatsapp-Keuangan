@@ -23,15 +23,15 @@ class AntiSpamManager {
         
         // Configuration
         this.config = {
-            // Per user limits - RELAXED FOR HIGH VOLUME
-            maxMessagesPerMinute: parseInt(process.env.ANTI_SPAM_USER_PER_MINUTE) || 15,
-            maxMessagesPerHour: parseInt(process.env.ANTI_SPAM_USER_PER_HOUR) || 200,
+            // Per user limits - FOCUSED ON PER-USER CONTROL
+            maxMessagesPerMinute: parseInt(process.env.ANTI_SPAM_USER_PER_MINUTE) || 20, // 20 per minute as requested
+            maxMessagesPerHour: parseInt(process.env.ANTI_SPAM_USER_PER_HOUR) || 500, // High hourly limit
             maxDuplicateMessages: parseInt(process.env.ANTI_SPAM_MAX_DUPLICATES) || 5,
             
-            // Global limits (to prevent WhatsApp ban) - RELAXED FOR HIGH VOLUME
-            maxGlobalMessagesPerMinute: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_MINUTE) || 100,
-            maxGlobalMessagesPerHour: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_HOUR) || 3000,
-            maxGlobalMessagesPerDay: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_DAY) || 50000,
+            // Global limits - MINIMAL/DISABLED FOR HIGH VOLUME
+            maxGlobalMessagesPerMinute: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_MINUTE) || 999999, // Essentially unlimited
+            maxGlobalMessagesPerHour: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_HOUR) || 999999, // Essentially unlimited
+            maxGlobalMessagesPerDay: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_DAY) || 999999, // Essentially unlimited
             
             // Spam detection - RELAXED FOR HIGH VOLUME
             duplicateMessageWindow: parseInt(process.env.ANTI_SPAM_DUPLICATE_WINDOW) || 300000, // 5 minutes
@@ -42,14 +42,14 @@ class AntiSpamManager {
             userCooldownMinutes: parseInt(process.env.ANTI_SPAM_USER_COOLDOWN) || 1,
             globalCooldownMinutes: parseInt(process.env.ANTI_SPAM_GLOBAL_COOLDOWN) || 2,
             
-            // Emergency brake - HIGHER THRESHOLD FOR HIGH VOLUME
-            emergencyBrakeEnabled: process.env.ANTI_SPAM_EMERGENCY_BRAKE !== 'false',
-            emergencyBrakeThreshold: parseInt(process.env.ANTI_SPAM_EMERGENCY_THRESHOLD) || 200, // messages per minute
+            // Emergency brake - DISABLED FOR HIGH VOLUME (only per-user limits matter)
+            emergencyBrakeEnabled: process.env.ANTI_SPAM_EMERGENCY_BRAKE === 'true', // Default OFF
+            emergencyBrakeThreshold: parseInt(process.env.ANTI_SPAM_EMERGENCY_THRESHOLD) || 999999, // Very high threshold
             
-            // Anti-banned features
-            enableBanRiskDetection: process.env.ANTI_BANNED_DETECTION !== 'false',
-            enableNaturalDelays: process.env.ANTI_BANNED_NATURAL_DELAYS !== 'false',
-            enableResponseVariation: process.env.ANTI_BANNED_RESPONSE_VARIATION !== 'false',
+            // Anti-banned features - SIMPLIFIED FOR PER-USER FOCUS
+            enableBanRiskDetection: process.env.ANTI_BANNED_DETECTION === 'true', // Default OFF
+            enableNaturalDelays: process.env.ANTI_BANNED_NATURAL_DELAYS === 'true', // Default OFF
+            enableResponseVariation: process.env.ANTI_BANNED_RESPONSE_VARIATION === 'true', // Default OFF
             
             // Ban risk thresholds - RELAXED FOR HIGH VOLUME
             banRiskThresholds: {
