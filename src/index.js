@@ -144,8 +144,22 @@ class WhatsAppFinancialBot {
         });
 
         this.app.get('/qrscan/status', (req, res) => {
-            // Check if we actually have an active WhatsApp connection
-            const hasActiveConnection = this.sock && this.sock.readyState === 'open' && this.isWhatsAppConnected;
+            // Improved connection status detection
+            let hasActiveConnection = false;
+            
+            // Check multiple indicators of active connection
+            if (this.sock && this.isWhatsAppConnected) {
+                // Check if socket exists and has user info (indicates successful auth)
+                hasActiveConnection = !!(this.sock.user && this.sock.user.id);
+                
+                // Additional check: if socket readyState exists and is open
+                if (this.sock.readyState) {
+                    hasActiveConnection = hasActiveConnection && this.sock.readyState === 'open';
+                }
+            }
+            
+            // Log status for debugging
+            this.logger.debug(`QR Status Check - Connected: ${hasActiveConnection}, Socket exists: ${!!this.sock}, Internal flag: ${this.isWhatsAppConnected}, User ID: ${this.sock?.user?.id || 'none'}, Socket state: ${this.sock?.readyState || 'none'}`);
             
             res.json({
                 qr: this.currentQRCode,
@@ -694,6 +708,9 @@ class WhatsAppFinancialBot {
             // Update connection status for web interface
             this.isWhatsAppConnected = true;
             this.currentQRCode = null;
+            
+            // Log connection status for debugging
+            this.logger.info('🌐 QR Scan UI Status Updated: Connected = true, QR = null');
 
             // Initialize messaging API service after WhatsApp connection is established
             this.messagingAPI = new MessagingAPIService(this.sock, this.antiSpam, this.db);

@@ -9,6 +9,14 @@ class PostgresDatabase extends BaseDatabase {
         this.pool = null;
         this.client = null;
         this.logger = new Logger();
+        this.poolMetrics = {
+            connectionsCreated: 0,
+            connectionsDestroyed: 0,
+            queriesExecuted: 0,
+            errorsCount: 0,
+            avgQueryTime: 0,
+            lastHealthCheck: null
+        };
     }
 
     async initialize() {
@@ -24,25 +32,58 @@ class PostgresDatabase extends BaseDatabase {
                 ssl: this.config.ssl ? {
                     rejectUnauthorized: false // Required for Supabase
                 } : false,
-                // Optimized pool settings for better performance
+                
+                // ==========================================
+                // OPTIMIZED POOL SETTINGS FOR TRANSACTION POOLER
+                // ==========================================
+                
+                // Pool Size Configuration
                 max: parseInt(process.env.DB_POOL_MAX) || 25, // Maximum number of clients in the pool
                 min: parseInt(process.env.DB_POOL_MIN) || 5,  // Minimum number of clients to keep in pool
+                
+                // Connection Timeouts (Fine-tuned for optimal performance)
                 idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000, // 30 seconds
                 connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 5000, // 5 seconds
                 acquireTimeoutMillis: parseInt(process.env.DB_ACQUIRE_TIMEOUT) || 10000, // 10 seconds
                 createTimeoutMillis: parseInt(process.env.DB_CREATE_TIMEOUT) || 5000, // 5 seconds
                 destroyTimeoutMillis: parseInt(process.env.DB_DESTROY_TIMEOUT) || 5000, // 5 seconds
+                
+                // Pool Management (Optimized for transaction throughput)
                 reapIntervalMillis: parseInt(process.env.DB_REAP_INTERVAL) || 1000, // 1 second
                 createRetryIntervalMillis: parseInt(process.env.DB_CREATE_RETRY_INTERVAL) || 200, // 200ms
-                // Enable keep-alive for better connection stability
+                
+                // Connection Stability & Performance
                 keepAlive: true,
                 keepAliveInitialDelayMillis: 10000,
-                // Statement timeout for long-running queries
+                
+                // Query Performance Optimization
                 statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT) || 30000, // 30 seconds
-                // Query timeout
                 query_timeout: parseInt(process.env.DB_QUERY_TIMEOUT) || 30000, // 30 seconds
-                // Application name for monitoring
+                
+                // Application identification for monitoring
                 application_name: process.env.APP_NAME || 'whatsapp-financial-bot',
+                
+                // ==========================================
+                // ADDITIONAL POSTGRESQL OPTIMIZATIONS
+                // ==========================================
+                
+                // Connection-level optimizations
+                options: '--application_name=' + (process.env.APP_NAME || 'whatsapp-financial-bot'),
+                
+                // Performance parameters for PostgreSQL
+                parseInputDatesAsUTC: true,
+                
+                // Connection pooling specific optimizations
+                allowExitOnIdle: false, // Keep pool alive
+                
+                // Advanced timeout settings
+                idleInTransactionSessionTimeout: parseInt(process.env.DB_IDLE_IN_TRANSACTION_TIMEOUT) || 60000, // 60 seconds
+                
+                // Connection validation
+                validateConnection: true,
+                
+                // Pool event handling
+                Promise: Promise, // Use native Promise for better performance
             };
 
             // Add extra config if provided (for Supabase)
@@ -52,56 +93,88 @@ class PostgresDatabase extends BaseDatabase {
 
             this.pool = new Pool(poolConfig);
 
-            // Set up pool event handlers for monitoring
+            // Set up enhanced pool event handlers for monitoring
             this.setupPoolEventHandlers();
 
-            // Test connection
-            const testClient = await this.pool.connect();
-            testClient.release();
+            // Test connection with enhanced validation
+            await this.validatePoolConnection();
             
             // Create tables
             await this.createTables();
             
             // Log pool configuration for debugging
-            this.logger.info('PostgreSQL pool initialized with config:', {
+            this.logger.info('PostgreSQL Transaction Pool initialized with enhanced config:', {
                 max: poolConfig.max,
                 min: poolConfig.min,
                 idleTimeout: poolConfig.idleTimeoutMillis,
-                connectionTimeout: poolConfig.connectionTimeoutMillis
+                connectionTimeout: poolConfig.connectionTimeoutMillis,
+                acquireTimeout: poolConfig.acquireTimeoutMillis,
+                keepAlive: poolConfig.keepAlive,
+                statementTimeout: poolConfig.statement_timeout,
+                queryTimeout: poolConfig.query_timeout
             });
-            this.logger.info('PostgreSQL database initialized successfully');
+            this.logger.info('PostgreSQL database initialized successfully with Transaction Pooler');
         } catch (error) {
             this.logger.error('Error initializing PostgreSQL database:', error);
             throw error;
         }
     }
 
+    async validatePoolConnection() {
+        const testClient = await this.pool.connect();
+        try {
+            // Enhanced connection validation
+            const start = Date.now();
+            await testClient.query('SELECT NOW(), version()');
+            const duration = Date.now() - start;
+            
+            this.logger.info(`Pool connection validated successfully (${duration}ms)`);
+            this.poolMetrics.lastHealthCheck = new Date();
+        } finally {
+            testClient.release();
+        }
+    }
+
     setupPoolEventHandlers() {
-        // Monitor pool events for debugging and optimization
+        // Enhanced monitoring for transaction pooler optimization
         this.pool.on('connect', (client) => {
+            this.poolMetrics.connectionsCreated++;
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
-                this.logger.info('New client connected to pool');
+                this.logger.info(`New client connected to pool. Total created: ${this.poolMetrics.connectionsCreated}`);
             }
         });
 
         this.pool.on('acquire', (client) => {
             if (process.env.DEBUG_POOL === 'true') {
-                this.logger.info('Client acquired from pool');
+                this.logger.info(`Client acquired from pool. Pool stats: ${JSON.stringify(this.getPoolStatsSync())}`);
             }
         });
 
         this.pool.on('remove', (client) => {
+            this.poolMetrics.connectionsDestroyed++;
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
-                this.logger.info('Client removed from pool');
+                this.logger.info(`Client removed from pool. Total destroyed: ${this.poolMetrics.connectionsDestroyed}`);
             }
         });
 
         this.pool.on('error', (err, client) => {
-            this.logger.error('Unexpected error on idle client', err);
+            this.poolMetrics.errorsCount++;
+            this.logger.error('Unexpected error on idle client:', err);
+            this.logger.error('Pool error metrics:', {
+                totalErrors: this.poolMetrics.errorsCount,
+                poolStats: this.getPoolStatsSync()
+            });
+        });
+
+        // Enhanced pool monitoring
+        this.pool.on('drain', () => {
+            if (process.env.DEBUG_POOL === 'true') {
+                this.logger.warn('Pool has been drained - all clients checked out');
+            }
         });
     }
 
-    async getPoolStats() {
+    getPoolStatsSync() {
         if (!this.pool) return null;
         
         return {
@@ -113,13 +186,52 @@ class PostgresDatabase extends BaseDatabase {
         };
     }
 
+    async getPoolStats() {
+        if (!this.pool) return null;
+        
+        return {
+            // Basic pool statistics
+            totalCount: this.pool.totalCount,
+            idleCount: this.pool.idleCount,
+            waitingCount: this.pool.waitingCount,
+            max: this.pool.options.max,
+            min: this.pool.options.min,
+            
+            // Enhanced metrics for transaction pooler monitoring
+            connectionsCreated: this.poolMetrics.connectionsCreated,
+            connectionsDestroyed: this.poolMetrics.connectionsDestroyed,
+            queriesExecuted: this.poolMetrics.queriesExecuted,
+            errorsCount: this.poolMetrics.errorsCount,
+            avgQueryTime: this.poolMetrics.avgQueryTime,
+            lastHealthCheck: this.poolMetrics.lastHealthCheck,
+            
+            // Pool efficiency metrics
+            poolEfficiency: this.pool.totalCount > 0 ? (this.pool.idleCount / this.pool.totalCount * 100).toFixed(2) + '%' : '0%',
+            poolUtilization: this.pool.totalCount > 0 ? ((this.pool.totalCount - this.pool.idleCount) / this.pool.totalCount * 100).toFixed(2) + '%' : '0%',
+            
+            // Connection health
+            connectionHealth: this.poolMetrics.errorsCount < 5 ? 'healthy' : 'degraded',
+            
+            // Timestamp
+            timestamp: new Date().toISOString()
+        };
+    }
+
     async healthCheck() {
         try {
             const client = await this.pool.connect();
             const start = Date.now();
-            await client.query('SELECT 1');
+            
+            // Enhanced health check with multiple validations
+            await client.query('SELECT 1 as health_check');
+            await client.query('SELECT NOW() as server_time');
+            await client.query('SELECT version() as server_version');
+            
             const duration = Date.now() - start;
             client.release();
+            
+            // Update metrics
+            this.poolMetrics.lastHealthCheck = new Date();
             
             const stats = await this.getPoolStats();
             
@@ -127,14 +239,30 @@ class PostgresDatabase extends BaseDatabase {
                 status: 'healthy',
                 responseTime: duration,
                 poolStats: stats,
-                timestamp: new Date().toISOString()
+                connectionHealth: stats.connectionHealth,
+                poolEfficiency: stats.poolEfficiency,
+                poolUtilization: stats.poolUtilization,
+                timestamp: new Date().toISOString(),
+                
+                // Transaction pooler specific health indicators
+                transactionPoolerStatus: {
+                    optimalPoolSize: stats.totalCount >= stats.min && stats.totalCount <= stats.max,
+                    connectionReuse: stats.connectionsCreated > 0 && stats.queriesExecuted > stats.connectionsCreated,
+                    errorRate: stats.queriesExecuted > 0 ? (stats.errorsCount / stats.queriesExecuted * 100).toFixed(2) + '%' : '0%',
+                    poolStability: stats.connectionsDestroyed < stats.connectionsCreated * 0.5 // Less than 50% churn
+                }
             };
         } catch (error) {
+            this.poolMetrics.errorsCount++;
             this.logger.error('Database health check failed:', error);
             return {
                 status: 'unhealthy',
                 error: error.message,
-                timestamp: new Date().toISOString()
+                poolStats: await this.getPoolStats(),
+                timestamp: new Date().toISOString(),
+                transactionPoolerStatus: {
+                    error: 'Health check failed'
+                }
             };
         }
     }
@@ -142,15 +270,19 @@ class PostgresDatabase extends BaseDatabase {
     async close() {
         if (this.pool) {
             const stats = await this.getPoolStats();
-            this.logger.info('Closing PostgreSQL pool. Final stats:', stats);
+            this.logger.info('Closing PostgreSQL Transaction Pool. Final stats:', stats);
+            
+            // Graceful pool shutdown
             await this.pool.end();
-            this.logger.info('PostgreSQL database connection closed');
+            this.logger.info('PostgreSQL Transaction Pool closed successfully');
         }
     }
 
     async run(sql, params = []) {
         return this.executeWithRetry(async () => {
             let client;
+            const queryStart = Date.now();
+            
             try {
                 // Get client from pool with timeout
                 client = await this.pool.connect();
@@ -188,6 +320,11 @@ class PostgresDatabase extends BaseDatabase {
                 
                 const result = await client.query(pgSql, params);
                 
+                // Update metrics
+                const queryDuration = Date.now() - queryStart;
+                this.poolMetrics.queriesExecuted++;
+                this.poolMetrics.avgQueryTime = (this.poolMetrics.avgQueryTime + queryDuration) / 2;
+                
                 // Return SQLite-compatible result with proper lastID
                 const lastID = result.rows.length > 0 && result.rows[0].id ? result.rows[0].id :
                               (result.rowCount > 0 ? result.rowCount : null);
@@ -197,6 +334,7 @@ class PostgresDatabase extends BaseDatabase {
                     changes: result.rowCount
                 };
             } catch (error) {
+                this.poolMetrics.errorsCount++;
                 this.logger.error('PostgreSQL run error:', error);
                 this.logger.error('SQL:', sql);
                 this.logger.error('Params:', params);
@@ -228,8 +366,9 @@ class PostgresDatabase extends BaseDatabase {
                     throw error;
                 }
                 
-                // Exponential backoff with jitter
-                const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 100;
+                // Exponential backoff with jitter for better distribution
+                const jitter = Math.random() * 100;
+                const delay = baseDelay * Math.pow(2, attempt - 1) + jitter;
                 this.logger.warn(`Database operation failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms:`, error.message);
                 
                 await this.sleep(delay);
@@ -240,7 +379,7 @@ class PostgresDatabase extends BaseDatabase {
     }
 
     shouldNotRetry(error) {
-        // Don't retry on syntax errors, constraint violations, etc.
+        // Enhanced error detection for better retry logic
         const noRetryPatterns = [
             'syntax error',
             'column does not exist',
@@ -248,7 +387,10 @@ class PostgresDatabase extends BaseDatabase {
             'duplicate key value',
             'violates check constraint',
             'violates foreign key constraint',
-            'violates unique constraint'
+            'violates unique constraint',
+            'permission denied',
+            'authentication failed',
+            'invalid input syntax'
         ];
         
         return noRetryPatterns.some(pattern =>
@@ -263,6 +405,8 @@ class PostgresDatabase extends BaseDatabase {
     async get(sql, params = []) {
         return this.executeWithRetry(async () => {
             let client;
+            const queryStart = Date.now();
+            
             try {
                 client = await this.pool.connect();
                 let pgSql = sql;
@@ -270,8 +414,15 @@ class PostgresDatabase extends BaseDatabase {
                     pgSql = this.convertPlaceholders(sql);
                 }
                 const result = await client.query(pgSql, params);
+                
+                // Update metrics
+                const queryDuration = Date.now() - queryStart;
+                this.poolMetrics.queriesExecuted++;
+                this.poolMetrics.avgQueryTime = (this.poolMetrics.avgQueryTime + queryDuration) / 2;
+                
                 return result.rows[0] || null;
             } catch (error) {
+                this.poolMetrics.errorsCount++;
                 this.logger.error('PostgreSQL get error:', error);
                 this.logger.error('SQL:', sql);
                 this.logger.error('Params:', params);
@@ -287,6 +438,8 @@ class PostgresDatabase extends BaseDatabase {
     async all(sql, params = []) {
         return this.executeWithRetry(async () => {
             let client;
+            const queryStart = Date.now();
+            
             try {
                 client = await this.pool.connect();
                 let pgSql = sql;
@@ -294,8 +447,15 @@ class PostgresDatabase extends BaseDatabase {
                     pgSql = this.convertPlaceholders(sql);
                 }
                 const result = await client.query(pgSql, params);
+                
+                // Update metrics
+                const queryDuration = Date.now() - queryStart;
+                this.poolMetrics.queriesExecuted++;
+                this.poolMetrics.avgQueryTime = (this.poolMetrics.avgQueryTime + queryDuration) / 2;
+                
                 return result.rows;
             } catch (error) {
+                this.poolMetrics.errorsCount++;
                 this.logger.error('PostgreSQL all error:', error);
                 this.logger.error('SQL:', sql);
                 this.logger.error('Params:', params);
@@ -536,10 +696,11 @@ class PostgresDatabase extends BaseDatabase {
                 await client.query(table);
             }
 
-            // Create indexes for performance
+            // Create indexes for performance - optimized for transaction pooler
             const indexes = [
                 'CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_phone, date DESC)',
                 'CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id)',
+                'CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at DESC)',
                 'CREATE INDEX IF NOT EXISTS idx_debts_user_status ON debts(user_phone, status)',
                 'CREATE INDEX IF NOT EXISTS idx_debts_due_date ON debts(due_date)',
                 'CREATE INDEX IF NOT EXISTS idx_bills_user_active ON bills(user_phone, is_active)',
@@ -548,7 +709,10 @@ class PostgresDatabase extends BaseDatabase {
                 'CREATE INDEX IF NOT EXISTS idx_registration_sessions_phone ON registration_sessions(phone)',
                 'CREATE INDEX IF NOT EXISTS idx_registration_sessions_expires ON registration_sessions(expires_at)',
                 'CREATE INDEX IF NOT EXISTS idx_user_subscriptions_phone ON user_subscriptions(user_phone)',
-                'CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status ON user_subscriptions(status)'
+                'CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status ON user_subscriptions(status)',
+                'CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)',
+                'CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active) WHERE is_active = true',
+                'CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type) WHERE is_active = true'
             ];
 
             for (const index of indexes) {

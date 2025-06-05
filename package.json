@@ -33,7 +33,11 @@
     "test:api:history": "node scripts/test-api.js history",
     "test:api:quick": "chmod +x scripts/test-api.sh && ./scripts/test-api.sh quick",
     "test:api:interactive": "chmod +x scripts/test-api.sh && ./scripts/test-api.sh interactive",
-    "test:api:server": "chmod +x scripts/test-api.sh && ./scripts/test-api.sh server-check"
+    "test:api:server": "chmod +x scripts/test-api.sh && ./scripts/test-api.sh server-check",
+    "pool:monitor": "node scripts/monitor-pool-performance.js monitor",
+    "pool:check": "node scripts/monitor-pool-performance.js check",
+    "pool:load-test": "node scripts/monitor-pool-performance.js load-test",
+    "pool:help": "node scripts/monitor-pool-performance.js help"
   },
   "keywords": [
     "whatsapp",

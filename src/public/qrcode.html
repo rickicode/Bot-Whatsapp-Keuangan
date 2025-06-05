@@ -206,6 +206,8 @@
                     const qrContent = document.getElementById('qr-content');
                     const status = document.getElementById('status');
                     
+                    console.log('QR Status received:', data); // Debug log
+                    
                     // Priority: QR code always takes precedence over connection status
                     // This ensures QR code is shown when available, even if connection flag is incorrectly set
                     if (data.qr && data.qr.trim() !== '') {
@@ -213,7 +215,8 @@
                         status.className = 'status waiting';
                         status.innerHTML = '📱 Scan QR code dengan WhatsApp Anda';
                         isConnected = false; // Reset connection status when QR is available
-                    } else if (data.connected && !data.qr) {
+                    } else if (data.connected === true) {
+                        // Connected state - no QR needed
                         qrContent.innerHTML = '<div style="font-size: 48px; color: #27ae60;">✅</div><div style="margin-top: 15px; font-size: 18px; color: #27ae60; font-weight: 600;">Terhubung!</div>';
                         status.className = 'status connected';
                         status.innerHTML = '🎉 Bot WhatsApp berhasil terhubung dan siap digunakan!';
@@ -224,9 +227,18 @@
                         status.innerHTML = `❌ Error: ${data.error}`;
                         isConnected = false;
                     } else {
-                        qrContent.innerHTML = '<div class="loading">⏳ Menunggu QR code...</div>';
-                        status.className = 'status waiting';
-                        status.innerHTML = '🔄 Menunggu koneksi WhatsApp...';
+                        // Default waiting state - either waiting for QR or connection
+                        if (data.connected === false && !data.qr) {
+                            // Connection is false but no QR yet - still initializing
+                            qrContent.innerHTML = '<div class="loading">⏳ Menginisialisasi koneksi...</div>';
+                            status.className = 'status waiting';
+                            status.innerHTML = '🔄 Sedang menginisialisasi WhatsApp...';
+                        } else {
+                            // Generic waiting state
+                            qrContent.innerHTML = '<div class="loading">⏳ Menunggu QR code...</div>';
+                            status.className = 'status waiting';
+                            status.innerHTML = '🔄 Menunggu koneksi WhatsApp...';
+                        }
                         isConnected = false;
                     }
                 })
@@ -255,6 +267,13 @@
         
         // Auto-update setiap 5 detik
         setInterval(updateQRCode, 5000);
+        
+        // Additional check every 15 seconds for connection status (slower poll to avoid spam)
+        setInterval(() => {
+            if (!isConnected) {
+                updateQRCode();
+            }
+        }, 15000);
         
         // Add event listener for refresh button
         document.getElementById('refresh-btn').addEventListener('click', refreshQR);
