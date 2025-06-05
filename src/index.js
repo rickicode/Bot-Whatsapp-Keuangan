@@ -15,6 +15,7 @@ const AIService = require('./services/AIService');
 const IndonesianAIAssistant = require('./services/IndonesianAIAssistant');
 const Logger = require('./utils/Logger');
 const AntiSpamManager = require('./utils/AntiSpamManager');
+const TypingManager = require('./utils/TypingManager');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -33,6 +34,7 @@ class WhatsAppFinancialBot {
         this.indonesianAI = null;
         this.reminderService = null;
         this.messagingAPI = null;
+        this.typingManager = null;
         this.logger = new Logger();
         this.antiSpam = new AntiSpamManager();
         this.app = express();
@@ -89,6 +91,9 @@ class WhatsAppFinancialBot {
                     antiSpam: {
                         initialized: this.antiSpam ? true : false
                     },
+                    typing: {
+                        initialized: this.typingManager ? true : false
+                    },
                     sessions: {
                         pending: global.pendingTransactions ? global.pendingTransactions.size : 0,
                         edit: global.editSessions ? global.editSessions.size : 0,
@@ -117,12 +122,26 @@ class WhatsAppFinancialBot {
                         const stats = this.antiSpam.getStats();
                         health.antiSpam.emergencyBrakeActive = stats.global.emergencyBrakeActive;
                         health.antiSpam.messagesPerMinute = stats.global.messagesPerMinute;
+                        health.antiSpam.banRiskLevel = stats.global.banRiskLevel;
                         
-                        if (stats.global.emergencyBrakeActive) {
+                        if (stats.global.emergencyBrakeActive || stats.global.banRiskLevel === 'CRITICAL') {
                             health.status = 'CRITICAL';
+                        } else if (stats.global.banRiskLevel === 'HIGH') {
+                            health.status = 'DEGRADED';
                         }
                     } catch (error) {
                         health.antiSpam.error = error.message;
+                    }
+                }
+
+                // Check typing manager status
+                if (this.typingManager) {
+                    try {
+                        const typingStats = this.typingManager.getStats();
+                        health.typing.activeTyping = typingStats.activeTyping;
+                        health.typing.queuedMessages = typingStats.queuedMessages;
+                    } catch (error) {
+                        health.typing.error = error.message;
                     }
                 }
 
@@ -220,6 +239,33 @@ class WhatsAppFinancialBot {
                     });
                 } else {
                     res.status(500).json({ error: 'Anti-spam not initialized' });
+                }
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Typing manager monitoring endpoints
+        this.app.get('/typing/stats', (req, res) => {
+            try {
+                const stats = this.typingManager ? this.typingManager.getStats() : { error: 'Typing manager not initialized' };
+                res.json({
+                    status: 'OK',
+                    timestamp: new Date().toISOString(),
+                    stats
+                });
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.post('/typing/stop-all', (req, res) => {
+            try {
+                if (this.typingManager) {
+                    this.typingManager.stopAllTyping();
+                    res.json({ status: 'All typing stopped', timestamp: new Date().toISOString() });
+                } else {
+                    res.status(500).json({ error: 'Typing manager not initialized' });
                 }
             } catch (error) {
                 res.status(500).json({ error: error.message });
@@ -628,6 +674,9 @@ class WhatsAppFinancialBot {
 
         // Initialize command handler with the socket
         this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock);
+        
+        // Initialize typing manager with the socket
+        this.typingManager = new TypingManager(this.sock);
 
         // Use a single event listener to avoid duplicates
         this.sock.ev.on('connection.update', async (update) => {
@@ -805,15 +854,27 @@ class WhatsAppFinancialBot {
                         return; // Don't send the message
                     }
 
+                    // Apply natural delay if suggested by anti-spam
+                    if (outgoingCheck.naturalDelay > 0) {
+                        this.logger.debug(`⏳ Applying natural delay: ${outgoingCheck.naturalDelay}ms for ${userPhone}`);
+                        await new Promise(resolve => setTimeout(resolve, outgoingCheck.naturalDelay));
+                    }
+
                     // Log outgoing message from bot
                     this.logger.info(`📤 Bot reply to ${userPhone}: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
                     
-                    // Send message and ensure it's marked as from bot
-                    await this.sock.sendMessage(userJid, {
-                        text: text,
-                        // Add metadata to help identify bot messages
-                        quoted: message
-                    });
+                    // Send message with typing indicator for natural feel
+                    if (this.typingManager) {
+                        await this.typingManager.sendWithTyping(userJid, text, {
+                            quoted: message
+                        });
+                    } else {
+                        // Fallback if typing manager not available
+                        await this.sock.sendMessage(userJid, {
+                            text: text,
+                            quoted: message
+                        });
+                    }
                 } catch (error) {
                     this.logger.error(`Failed to send reply to ${userPhone}:`, error);
                     throw error;
@@ -944,6 +1005,11 @@ class WhatsAppFinancialBot {
                     }
                 }
 
+                // Clean up typing manager expired states
+                if (this.typingManager) {
+                    this.typingManager.cleanupExpiredTyping();
+                }
+
                 if (cleanedCount > 0) {
                     this.logger.info(`🧹 Periodic cleanup: removed ${cleanedCount} expired sessions`);
                 }
@@ -959,6 +1025,11 @@ class WhatsAppFinancialBot {
         this.logger.info('🛑 Shutting down bot...');
         
         try {
+            // Stop all typing states
+            if (this.typingManager) {
+                await this.typingManager.stopAllTyping();
+            }
+            
             if (this.sock) {
                 this.sock.end();
             }

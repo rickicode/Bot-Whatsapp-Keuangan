@@ -8,41 +8,75 @@ class AntiSpamManager {
         this.globalStats = {
             totalMessages: 0,
             messagesPerMinute: 0,
-            lastReset: Date.now()
+            messagesPerHour: 0,
+            lastMinuteReset: Date.now(),
+            lastHourReset: Date.now()
         };
+        
+        // Anti-banned detection
+        this.suspiciousPatterns = new Map(); // userPhone -> suspicious activity
+        this.banRiskLevel = 'LOW'; // LOW, MEDIUM, HIGH, CRITICAL
+        this.lastRiskAssessment = Date.now();
+        
+        // Message timing tracking for natural behavior
+        this.messageTiming = new Map(); // userPhone -> timing patterns
         
         // Configuration
         this.config = {
             // Per user limits
-            maxMessagesPerMinute: parseInt(process.env.ANTI_SPAM_USER_PER_MINUTE) || 10,
-            maxMessagesPerHour: parseInt(process.env.ANTI_SPAM_USER_PER_HOUR) || 100,
-            maxDuplicateMessages: parseInt(process.env.ANTI_SPAM_MAX_DUPLICATES) || 3,
+            maxMessagesPerMinute: parseInt(process.env.ANTI_SPAM_USER_PER_MINUTE) || 8,
+            maxMessagesPerHour: parseInt(process.env.ANTI_SPAM_USER_PER_HOUR) || 60,
+            maxDuplicateMessages: parseInt(process.env.ANTI_SPAM_MAX_DUPLICATES) || 2,
             
-            // Global limits (to prevent WhatsApp ban)
-            maxGlobalMessagesPerMinute: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_MINUTE) || 50,
-            maxGlobalMessagesPerHour: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_HOUR) || 1000,
+            // Global limits (to prevent WhatsApp ban) - more conservative
+            maxGlobalMessagesPerMinute: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_MINUTE) || 30,
+            maxGlobalMessagesPerHour: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_HOUR) || 600,
+            maxGlobalMessagesPerDay: parseInt(process.env.ANTI_SPAM_GLOBAL_PER_DAY) || 8000,
             
             // Spam detection
-            duplicateMessageWindow: parseInt(process.env.ANTI_SPAM_DUPLICATE_WINDOW) || 60000, // 1 minute
-            rapidFireThreshold: parseInt(process.env.ANTI_SPAM_RAPID_FIRE) || 5, // 5 messages in 10 seconds
+            duplicateMessageWindow: parseInt(process.env.ANTI_SPAM_DUPLICATE_WINDOW) || 120000, // 2 minutes
+            rapidFireThreshold: parseInt(process.env.ANTI_SPAM_RAPID_FIRE) || 3, // 3 messages in 10 seconds
             rapidFireWindow: parseInt(process.env.ANTI_SPAM_RAPID_FIRE_WINDOW) || 10000, // 10 seconds
             
             // Cooldown periods
-            userCooldownMinutes: parseInt(process.env.ANTI_SPAM_USER_COOLDOWN) || 5,
-            globalCooldownMinutes: parseInt(process.env.ANTI_SPAM_GLOBAL_COOLDOWN) || 2,
+            userCooldownMinutes: parseInt(process.env.ANTI_SPAM_USER_COOLDOWN) || 3,
+            globalCooldownMinutes: parseInt(process.env.ANTI_SPAM_GLOBAL_COOLDOWN) || 5,
             
             // Emergency brake
             emergencyBrakeEnabled: process.env.ANTI_SPAM_EMERGENCY_BRAKE !== 'false',
-            emergencyBrakeThreshold: parseInt(process.env.ANTI_SPAM_EMERGENCY_THRESHOLD) || 100 // messages per minute
+            emergencyBrakeThreshold: parseInt(process.env.ANTI_SPAM_EMERGENCY_THRESHOLD) || 50, // messages per minute
+            
+            // Anti-banned features
+            enableBanRiskDetection: process.env.ANTI_BANNED_DETECTION !== 'false',
+            enableNaturalDelays: process.env.ANTI_BANNED_NATURAL_DELAYS !== 'false',
+            enableResponseVariation: process.env.ANTI_BANNED_RESPONSE_VARIATION !== 'false',
+            
+            // Ban risk thresholds
+            banRiskThresholds: {
+                suspiciousPatternCount: parseInt(process.env.BAN_RISK_PATTERN_COUNT) || 5,
+                rapidResponseCount: parseInt(process.env.BAN_RISK_RAPID_RESPONSE) || 10,
+                identicalResponseCount: parseInt(process.env.BAN_RISK_IDENTICAL_RESPONSE) || 3,
+                maxHourlyMessages: parseInt(process.env.BAN_RISK_HOURLY_MAX) || 400
+            },
+            
+            // Natural behavior simulation - FASTER SETTINGS
+            naturalDelays: {
+                min: parseInt(process.env.NATURAL_DELAY_MIN) || 200, // 0.2s (faster)
+                max: parseInt(process.env.NATURAL_DELAY_MAX) || 1000, // 1s (faster)
+                readingTimePerChar: parseInt(process.env.READING_TIME_PER_CHAR) || 10, // 10ms per char (faster)
+                thinkingTime: parseInt(process.env.THINKING_TIME) || 500 // 0.5s thinking time (faster)
+            }
         };
 
         // Start periodic cleanup and monitoring
         this.startPeriodicTasks();
         
-        this.logger.info('🛡️ Anti-Spam Manager initialized with limits:', {
+        this.logger.info('🛡️ Enhanced Anti-Spam & Anti-Banned Manager initialized:', {
             userPerMinute: this.config.maxMessagesPerMinute,
             globalPerMinute: this.config.maxGlobalMessagesPerMinute,
-            emergencyBrake: this.config.emergencyBrakeEnabled
+            emergencyBrake: this.config.emergencyBrakeEnabled,
+            banRiskDetection: this.config.enableBanRiskDetection,
+            naturalDelays: this.config.enableNaturalDelays
         });
     }
 
@@ -56,11 +90,20 @@ class AntiSpamManager {
                 return { allowed: true, reason: 'admin_bypass' };
             }
 
+            // Check ban risk level first
+            if (this.config.enableBanRiskDetection) {
+                const banRiskCheck = await this.assessBanRisk(userPhone, messageText, isOutgoing);
+                if (!banRiskCheck.allowed) {
+                    this.logger.error(`🚨 BAN RISK DETECTED for ${userPhone}:`, banRiskCheck);
+                    return banRiskCheck;
+                }
+            }
+
             // Global emergency brake
             if (this.config.emergencyBrakeEnabled && this.isEmergencyBrakeTriggered()) {
                 this.logger.error('🚨 EMERGENCY BRAKE TRIGGERED - Stopping all outgoing messages');
-                return { 
-                    allowed: false, 
+                return {
+                    allowed: false,
                     reason: 'emergency_brake',
                     message: '🚨 Sistem dalam mode darurat. Silakan tunggu beberapa menit.',
                     cooldownUntil: now + (this.config.globalCooldownMinutes * 60000)
@@ -95,16 +138,255 @@ class AntiSpamManager {
                 return rapidFireCheck;
             }
 
+            // Check for bot-like behavior patterns
+            if (this.config.enableBanRiskDetection && isOutgoing) {
+                const botPatternCheck = this.checkBotPatterns(userPhone, messageText);
+                if (!botPatternCheck.allowed) {
+                    this.logger.warn(`🤖 Bot pattern detected for ${userPhone}:`, botPatternCheck);
+                    return botPatternCheck;
+                }
+            }
+
             // Record the message if all checks pass
             this.recordMessage(userPhone, messageText, isOutgoing);
             
-            return { allowed: true, reason: 'passed_all_checks' };
+            // Calculate natural delay if enabled
+            let naturalDelay = 0;
+            if (this.config.enableNaturalDelays && isOutgoing) {
+                naturalDelay = this.calculateNaturalDelay(messageText);
+            }
+            
+            return {
+                allowed: true,
+                reason: 'passed_all_checks',
+                naturalDelay,
+                banRiskLevel: this.banRiskLevel
+            };
 
         } catch (error) {
             this.logger.error('Error in anti-spam check:', error);
             // Fail safe - allow message but log error
             return { allowed: true, reason: 'error_failsafe' };
         }
+    }
+
+    /**
+     * Assess ban risk based on various factors
+     */
+    async assessBanRisk(userPhone, messageText, isOutgoing) {
+        const now = Date.now();
+        
+        // Update risk assessment every 5 minutes
+        if (now - this.lastRiskAssessment > 300000) {
+            this.updateBanRiskLevel();
+            this.lastRiskAssessment = now;
+        }
+        
+        // CRITICAL risk - stop immediately
+        if (this.banRiskLevel === 'CRITICAL') {
+            return {
+                allowed: false,
+                reason: 'critical_ban_risk',
+                message: '🚨 CRITICAL: Sistem dihentikan untuk mencegah banned. Tunggu 10 menit.',
+                cooldownUntil: now + 600000, // 10 minutes
+                banRiskLevel: this.banRiskLevel
+            };
+        }
+        
+        // HIGH risk - severe limitations
+        if (this.banRiskLevel === 'HIGH') {
+            // Only allow 1 message per 2 minutes for each user
+            const userLimit = this.userLimits.get(userPhone);
+            if (userLimit && now - userLimit.lastMessageTime < 120000) {
+                return {
+                    allowed: false,
+                    reason: 'high_ban_risk_throttle',
+                    message: '⚠️ Risiko banned tinggi. Pesan dibatasi 1 per 2 menit.',
+                    cooldownUntil: userLimit.lastMessageTime + 120000,
+                    banRiskLevel: this.banRiskLevel
+                };
+            }
+        }
+        
+        // MEDIUM risk - moderate limitations
+        if (this.banRiskLevel === 'MEDIUM') {
+            // Only allow 1 message per minute for each user
+            const userLimit = this.userLimits.get(userPhone);
+            if (userLimit && now - userLimit.lastMessageTime < 60000) {
+                return {
+                    allowed: false,
+                    reason: 'medium_ban_risk_throttle',
+                    message: '⚠️ Risiko banned sedang. Pesan dibatasi 1 per menit.',
+                    cooldownUntil: userLimit.lastMessageTime + 60000,
+                    banRiskLevel: this.banRiskLevel
+                };
+            }
+        }
+        
+        return { allowed: true, banRiskLevel: this.banRiskLevel };
+    }
+
+    /**
+     * Update ban risk level based on system behavior
+     */
+    updateBanRiskLevel() {
+        const stats = this.getDetailedStats();
+        let riskScore = 0;
+        
+        // Factor 1: Message volume
+        if (stats.global.messagesPerMinute > 40) riskScore += 3;
+        else if (stats.global.messagesPerMinute > 25) riskScore += 2;
+        else if (stats.global.messagesPerMinute > 15) riskScore += 1;
+        
+        if (stats.global.messagesPerHour > 500) riskScore += 3;
+        else if (stats.global.messagesPerHour > 300) riskScore += 2;
+        else if (stats.global.messagesPerHour > 200) riskScore += 1;
+        
+        // Factor 2: Suspicious patterns
+        const suspiciousUsers = Array.from(this.suspiciousPatterns.values())
+            .reduce((total, patterns) => total + patterns.length, 0);
+        if (suspiciousUsers > 20) riskScore += 3;
+        else if (suspiciousUsers > 10) riskScore += 2;
+        else if (suspiciousUsers > 5) riskScore += 1;
+        
+        // Factor 3: Rapid fire incidents
+        const rapidFireUsers = Array.from(this.userLimits.values())
+            .filter(limit => limit.rapidFireIncidents > 0).length;
+        if (rapidFireUsers > 5) riskScore += 2;
+        else if (rapidFireUsers > 2) riskScore += 1;
+        
+        // Factor 4: Emergency brake triggers
+        if (this.globalStats.emergencyBrakeCount > 3) riskScore += 4;
+        else if (this.globalStats.emergencyBrakeCount > 1) riskScore += 2;
+        
+        // Determine risk level
+        const previousRisk = this.banRiskLevel;
+        if (riskScore >= 8) {
+            this.banRiskLevel = 'CRITICAL';
+        } else if (riskScore >= 5) {
+            this.banRiskLevel = 'HIGH';
+        } else if (riskScore >= 3) {
+            this.banRiskLevel = 'MEDIUM';
+        } else {
+            this.banRiskLevel = 'LOW';
+        }
+        
+        // Log risk level changes
+        if (this.banRiskLevel !== previousRisk) {
+            this.logger.warn(`🚨 Ban risk level changed: ${previousRisk} → ${this.banRiskLevel} (score: ${riskScore})`);
+        }
+        
+        return this.banRiskLevel;
+    }
+
+    /**
+     * Check for bot-like behavior patterns
+     */
+    checkBotPatterns(userPhone, messageText) {
+        const now = Date.now();
+        
+        // Get or create suspicious pattern tracking
+        if (!this.suspiciousPatterns.has(userPhone)) {
+            this.suspiciousPatterns.set(userPhone, []);
+        }
+        
+        const patterns = this.suspiciousPatterns.get(userPhone);
+        const userLimit = this.userLimits.get(userPhone);
+        
+        // Pattern 1: Too many identical responses
+        const recentMessages = (this.messageHistory.get(userPhone)?.messages || [])
+            .filter(msg => msg.isOutgoing && now - msg.timestamp < 3600000); // Last hour
+        
+        const identicalCount = recentMessages.filter(msg => msg.text === messageText).length;
+        if (identicalCount >= this.config.banRiskThresholds.identicalResponseCount) {
+            patterns.push({
+                type: 'identical_responses',
+                count: identicalCount,
+                timestamp: now
+            });
+        }
+        
+        // Pattern 2: Responses too fast (less than human reading time)
+        if (userLimit && userLimit.lastMessageTime) {
+            const timeSinceLastMessage = now - userLimit.lastMessageTime;
+            const minimumReadingTime = messageText.length * this.config.naturalDelays.readingTimePerChar;
+            
+            if (timeSinceLastMessage < minimumReadingTime + this.config.naturalDelays.thinkingTime) {
+                patterns.push({
+                    type: 'too_fast_response',
+                    responseTime: timeSinceLastMessage,
+                    expectedMinimum: minimumReadingTime + this.config.naturalDelays.thinkingTime,
+                    timestamp: now
+                });
+            }
+        }
+        
+        // Pattern 3: Too consistent response times
+        if (recentMessages.length >= 5) {
+            const responseTimes = [];
+            for (let i = 1; i < recentMessages.length; i++) {
+                responseTimes.push(recentMessages[i].timestamp - recentMessages[i-1].timestamp);
+            }
+            
+            const avgResponseTime = responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length;
+            const variance = responseTimes.reduce((sum, time) => sum + Math.pow(time - avgResponseTime, 2), 0) / responseTimes.length;
+            const stdDev = Math.sqrt(variance);
+            
+            // If responses are too consistent (low variance), it's suspicious
+            if (stdDev < avgResponseTime * 0.2 && avgResponseTime < 10000) { // Less than 20% variation and under 10s avg
+                patterns.push({
+                    type: 'consistent_timing',
+                    avgResponseTime,
+                    variance: stdDev,
+                    timestamp: now
+                });
+            }
+        }
+        
+        // Clean old patterns (keep only last hour)
+        const validPatterns = patterns.filter(pattern => now - pattern.timestamp < 3600000);
+        this.suspiciousPatterns.set(userPhone, validPatterns);
+        
+        // Check if too many suspicious patterns
+        if (validPatterns.length >= this.config.banRiskThresholds.suspiciousPatternCount) {
+            return {
+                allowed: false,
+                reason: 'bot_pattern_detected',
+                message: '🤖 Pola bot terdeteksi. Sistem akan istirahat 5 menit.',
+                cooldownUntil: now + 300000, // 5 minutes
+                patterns: validPatterns.slice(-3) // Last 3 patterns
+            };
+        }
+        
+        return { allowed: true };
+    }
+
+    /**
+     * Calculate natural delay to simulate human behavior
+     */
+    calculateNaturalDelay(messageText) {
+        if (!this.config.enableNaturalDelays) {
+            return 0;
+        }
+        
+        // Base reading time
+        const readingTime = messageText.length * this.config.naturalDelays.readingTimePerChar;
+        
+        // Thinking time
+        const thinkingTime = this.config.naturalDelays.thinkingTime;
+        
+        // Random variation
+        const minDelay = this.config.naturalDelays.min;
+        const maxDelay = this.config.naturalDelays.max;
+        const randomVariation = Math.random() * (maxDelay - minDelay) + minDelay;
+        
+        // Combine all factors
+        const totalDelay = Math.min(
+            readingTime + thinkingTime + randomVariation,
+            maxDelay
+        );
+        
+        return Math.max(totalDelay, minDelay);
     }
 
     checkGlobalLimits() {
@@ -119,6 +401,17 @@ class AntiSpamManager {
                 allowed: false,
                 reason: 'global_rate_limit_minute',
                 message: '⚠️ Sistem sedang sibuk. Silakan tunggu sebentar.',
+                cooldownUntil: now + (this.config.globalCooldownMinutes * 60000),
+                stats: this.globalStats
+            };
+        }
+
+        // Check per hour limit
+        if (this.globalStats.messagesPerHour >= this.config.maxGlobalMessagesPerHour) {
+            return {
+                allowed: false,
+                reason: 'global_rate_limit_hour',
+                message: '⚠️ Limit pesan per jam tercapai. Silakan tunggu.',
                 cooldownUntil: now + (this.config.globalCooldownMinutes * 60000),
                 stats: this.globalStats
             };
@@ -271,15 +564,23 @@ class AntiSpamManager {
 
         // Update global stats
         this.globalStats.totalMessages++;
+        this.globalStats.messagesPerMinute++;
+        this.globalStats.messagesPerHour++;
     }
 
     updateGlobalStats() {
         const now = Date.now();
         
         // Reset per minute counter if needed
-        if (now - this.globalStats.lastReset >= 60000) {
+        if (now - this.globalStats.lastMinuteReset >= 60000) {
             this.globalStats.messagesPerMinute = 0;
-            this.globalStats.lastReset = now;
+            this.globalStats.lastMinuteReset = now;
+        }
+        
+        // Reset per hour counter if needed
+        if (now - this.globalStats.lastHourReset >= 3600000) {
+            this.globalStats.messagesPerHour = 0;
+            this.globalStats.lastHourReset = now;
         }
     }
 
@@ -302,12 +603,62 @@ class AntiSpamManager {
             global: {
                 totalMessages: this.globalStats.totalMessages,
                 messagesPerMinute: this.globalStats.messagesPerMinute,
-                emergencyBrakeActive: this.isEmergencyBrakeTriggered()
+                messagesPerHour: this.globalStats.messagesPerHour,
+                emergencyBrakeActive: this.isEmergencyBrakeTriggered(),
+                banRiskLevel: this.banRiskLevel
             },
             users: {
                 total: this.userLimits.size,
                 inCooldown: Array.from(this.userLimits.values()).filter(u => u.cooldownUntil > now).length,
-                activeUsers: this.messageHistory.size
+                activeUsers: this.messageHistory.size,
+                suspiciousPatterns: this.suspiciousPatterns.size
+            },
+            config: this.config
+        };
+    }
+
+    // Get detailed statistics for ban risk assessment
+    getDetailedStats() {
+        const now = Date.now();
+        
+        // Count rapid fire incidents
+        const rapidFireUsers = Array.from(this.userLimits.values())
+            .filter(limit => {
+                if (!limit.rapidFireIncidents) limit.rapidFireIncidents = 0;
+                return limit.rapidFireIncidents > 0;
+            }).length;
+
+        // Count suspicious patterns
+        const totalSuspiciousPatterns = Array.from(this.suspiciousPatterns.values())
+            .reduce((total, patterns) => total + patterns.length, 0);
+
+        // Initialize emergency brake count if not exists
+        if (!this.globalStats.emergencyBrakeCount) {
+            this.globalStats.emergencyBrakeCount = 0;
+        }
+
+        return {
+            global: {
+                totalMessages: this.globalStats.totalMessages,
+                messagesPerMinute: this.globalStats.messagesPerMinute,
+                messagesPerHour: this.globalStats.messagesPerHour,
+                emergencyBrakeActive: this.isEmergencyBrakeTriggered(),
+                emergencyBrakeCount: this.globalStats.emergencyBrakeCount,
+                banRiskLevel: this.banRiskLevel
+            },
+            users: {
+                total: this.userLimits.size,
+                inCooldown: Array.from(this.userLimits.values()).filter(u => u.cooldownUntil > now).length,
+                activeUsers: this.messageHistory.size,
+                suspiciousPatterns: this.suspiciousPatterns.size,
+                totalSuspiciousPatterns,
+                rapidFireUsers
+            },
+            patterns: {
+                suspiciousPatternsPerUser: Array.from(this.suspiciousPatterns.entries())
+                    .map(([phone, patterns]) => ({ phone, count: patterns.length }))
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 10) // Top 10 users with most patterns
             },
             config: this.config
         };

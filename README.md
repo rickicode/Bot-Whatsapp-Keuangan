@@ -39,7 +39,17 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 - 📱 **Multi-Currency Support** - Handle different currencies
 - 🔐 **Security** - Encrypted data storage and user authentication
 
-### 🚀 NEW: REST API & Webhook Integration
+### 🛡️ Anti-Banned Features (NEW!)
+- 🤖 **Bot Pattern Detection** - Detects and prevents bot-like behavior
+- ⌨️ **Natural Typing Simulation** - Human-like typing indicators
+- 📊 **Ban Risk Assessment** - Real-time risk level monitoring (LOW/MEDIUM/HIGH/CRITICAL)
+- 🚨 **Emergency Brake System** - Automatic protection against rate limits
+- ⏱️ **Natural Delays** - Simulates human reading and thinking time
+- 🔄 **Response Variation** - Prevents identical response patterns
+- 📈 **Enhanced Rate Limiting** - Conservative limits to prevent detection
+- 🎯 **Adaptive Throttling** - Dynamic message limiting based on risk level
+
+### � NEW: REST API & Webhook Integration
 - 📡 **REST API** - Send WhatsApp messages via HTTP API
 - 🔗 **Webhook System** - Receive real-time notifications and triggers
 - 💳 **Payment Integration** - Automatic payment notifications
@@ -123,6 +133,16 @@ USER_ADMIN=+62xxxxxxxxxx
 # Note: ALLOWED_USERS tidak diperlukan lagi -
 # Semua user dapat register otomatis melalui Indonesian AI Assistant
 # USER_ADMIN menentukan siapa yang memiliki akses admin
+
+# Anti-Banned Configuration (NEW!)
+ANTI_BANNED_DETECTION=true
+ANTI_BANNED_NATURAL_DELAYS=true
+TYPING_NATURAL=true
+TYPING_SPOOF=true
+NATURAL_DELAY_MIN=500
+NATURAL_DELAY_MAX=3000
+ANTI_SPAM_GLOBAL_PER_MINUTE=30
+ANTI_SPAM_EMERGENCY_THRESHOLD=50
 ```
 
 ### Subscription Plans
@@ -525,7 +545,8 @@ this.commands['/newcommand'] = this.handleNewCommand.bind(this);
 ## 📚 Documentation
 
 - [🇮🇩 Indonesian AI Assistant](INDONESIAN_AI_ASSISTANT.md) - Complete guide to registration & subscription system
-- [📖 User Manual](docs/USER_MANUAL.md) - Detailed user guide
+- [🛡️ Anti-Banned Features](docs/ANTI_BANNED_FEATURES.md) - Comprehensive guide to anti-banned system & typing manager
+- [� User Manual](docs/USER_MANUAL.md) - Detailed user guide
 - [🚀 Deployment Guide](docs/DEPLOYMENT.md) - Production deployment
 - [🔌 API Reference](docs/API.md) - API documentation
 - [🛠️ Development Guide](docs/DEVELOPMENT.md) - Development setup
