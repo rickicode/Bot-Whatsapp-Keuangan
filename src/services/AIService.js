@@ -238,22 +238,23 @@ class AIService {
         }
     }
 
-    async parseNaturalLanguageTransaction(text, userPhone) {
+    async parseNaturalLanguageTransaction(text, userPhone, indonesianAI = null) {
         const systemPrompt = `Kamu adalah parser transaksi keuangan untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak detail transaksi.
 
 Kembalikan HANYA objek JSON dengan field berikut:
 - type: "income" atau "expense"
 - amount: number (tanpa simbol mata uang)
-- description: string (dalam bahasa Indonesia)
+- description: string (dalam bahasa Indonesia, tanpa kata-kata seperti "habis", "beli", "bayar")
 - category: string (kategori yang sesuai dalam bahasa Indonesia, atau "unknown" jika tidak yakin)
 - confidence: number (0-1, seberapa yakin dalam parsing)
 
 Contoh:
 "Saya habis 50000 untuk makan siang hari ini" -> {"type":"expense","amount":50000,"description":"makan siang hari ini","category":"Makanan","confidence":0.9}
 "Terima 500000 dari bayaran klien" -> {"type":"income","amount":500000,"description":"bayaran klien","category":"Freelance","confidence":0.9}
-"Beli bensin 100000" -> {"type":"expense","amount":100000,"description":"beli bensin","category":"Transportasi","confidence":0.9}
-"Gaji bulan ini 5000000" -> {"type":"income","amount":5000000,"description":"gaji bulan ini","category":"Gaji","confidence":0.9}
+"Beli bensin 100000" -> {"type":"expense","amount":100000,"description":"bensin","category":"Transportasi","confidence":0.9}
+"Habis jajan sate ayam 10000" -> {"type":"expense","amount":10000,"description":"jajan sate ayam","category":"Makanan","confidence":0.9}
 
+Untuk description, hindari kata-kata seperti "habis", "beli", "bayar", "sudah", "spent", "bought", "paid".
 Jika tidak yakin dengan kategori, gunakan "unknown".
 
 Input pengguna: "${text}"`;
@@ -266,7 +267,14 @@ Input pengguna: "${text}"`;
 
             // Try to parse JSON response
             const cleanResponse = response.replace(/```json\s*|\s*```/g, '').trim();
-            return JSON.parse(cleanResponse);
+            const parsedResult = JSON.parse(cleanResponse);
+            
+            // Apply title case formatting to description if indonesianAI is provided
+            if (indonesianAI && parsedResult.description) {
+                parsedResult.description = indonesianAI.cleanTransactionDescription(parsedResult.description);
+            }
+            
+            return parsedResult;
         } catch (error) {
             this.logger.error('Error parsing natural language transaction:', error);
             return null;
@@ -760,7 +768,7 @@ Jenis: ${type === 'income' ? 'Pemasukan' : 'Pengeluaran'}`;
         }
     }
 
-    async parseBulkTransactions(text, userPhone) {
+    async parseBulkTransactions(text, userPhone, indonesianAI = null) {
         const systemPrompt = `Kamu adalah parser transaksi keuangan bulk untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak multiple transaksi sekaligus.
 
 Kembalikan HANYA objek JSON dengan format:
@@ -788,9 +796,9 @@ Permen 2k"
 Hasil yang diharapkan:
 {
   "transactions": [
-    {"type":"expense","amount":33000,"description":"belanja baju albi","category":"Belanja","confidence":0.9},
+    {"type":"expense","amount":33000,"description":"baju albi","category":"Belanja","confidence":0.9},
     {"type":"expense","amount":30000,"description":"mainan albi","category":"Belanja","confidence":0.8},
-    {"type":"expense","amount":20000,"description":"galon + kopi","category":"Makanan","confidence":0.9},
+    {"type":"expense","amount":20000,"description":"galon kopi","category":"Makanan","confidence":0.9},
     {"type":"expense","amount":2000,"description":"parkir","category":"Transportasi","confidence":0.9},
     {"type":"expense","amount":2000,"description":"permen","category":"Makanan","confidence":0.9}
   ],
@@ -805,6 +813,8 @@ Rules:
 4. Berikan kategori yang tepat untuk setiap transaksi
 5. Minimum confidence 0.6 untuk dianggap valid
 6. Jika ada transaksi yang tidak jelas, set confidence rendah
+7. PENTING: Untuk description, hindari kata-kata seperti "habis", "beli", "belanja", "bayar", "sudah", "spent", "bought", "paid"
+8. Fokus pada objek/item yang dibeli, bukan aksinya
 
 Input pengguna: "${text}"`;
 
@@ -827,6 +837,15 @@ Input pengguna: "${text}"`;
             const validTransactions = parsed.transactions.filter(t =>
                 t.type && t.amount && t.description && t.confidence >= 0.6
             );
+
+            // Apply title case formatting to descriptions if indonesianAI is provided
+            if (indonesianAI) {
+                validTransactions.forEach(transaction => {
+                    if (transaction.description) {
+                        transaction.description = indonesianAI.cleanTransactionDescription(transaction.description);
+                    }
+                });
+            }
 
             return {
                 transactions: validTransactions,

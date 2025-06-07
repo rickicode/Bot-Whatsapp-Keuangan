@@ -674,7 +674,7 @@ class WhatsAppFinancialBot {
         });
 
         // Initialize command handler with the socket
-        this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock);
+        this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock, this.indonesianAI);
         
         // Initialize typing manager with the socket
         this.typingManager = new TypingManager(this.sock);

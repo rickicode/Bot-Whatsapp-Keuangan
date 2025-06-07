@@ -7,6 +7,62 @@ class IndonesianAIAssistant {
         this.logger = new Logger();
     }
 
+    // Helper function to convert text to proper title case for Indonesian
+    toTitleCase(text) {
+        if (!text || typeof text !== 'string') return text;
+        
+        // Words that should remain lowercase (Indonesian articles, prepositions, etc.)
+        const lowercaseWords = [
+            'dan', 'atau', 'di', 'ke', 'dari', 'untuk', 'dengan', 'dalam', 'pada', 'oleh',
+            'yang', 'itu', 'ini', 'akan', 'telah', 'sudah', 'adalah', 'ada', 'tidak',
+            'per', 'sama', 'juga', 'lagi', 'bisa', 'dapat', 'harus', 'mau', 'ingin',
+            'ya', 'sih', 'kok', 'dong', 'deh', 'kan', 'lah', 'kah', 'tuh'
+        ];
+        
+        return text
+            .toLowerCase()
+            .split(' ')
+            .map((word, index) => {
+                // Always capitalize first word
+                if (index === 0) {
+                    return word.charAt(0).toUpperCase() + word.slice(1);
+                }
+                
+                // Keep lowercase words lowercase (except first word)
+                if (lowercaseWords.includes(word)) {
+                    return word;
+                }
+                
+                // Capitalize other words
+                return word.charAt(0).toUpperCase() + word.slice(1);
+            })
+            .join(' ');
+    }
+
+    // Clean and format AI transaction description
+    cleanTransactionDescription(description) {
+        if (!description || typeof description !== 'string') return description;
+        
+        // Remove common prefixes that AI might add
+        const prefixesToRemove = [
+            'habis ', 'sudah ', 'beli ', 'bayar ', 'buat ', 'untuk ',
+            'spent ', 'bought ', 'paid ', 'purchase ', 'buy '
+        ];
+        
+        let cleaned = description.toLowerCase();
+        
+        // Remove prefixes
+        for (const prefix of prefixesToRemove) {
+            if (cleaned.startsWith(prefix)) {
+                cleaned = cleaned.substring(prefix.length);
+                break;
+            }
+        }
+        
+        // Apply title case
+        return this.toTitleCase(cleaned.trim());
+    }
+
     async processMessage(message, userPhone, messageText) {
         try {
             // Update user activity

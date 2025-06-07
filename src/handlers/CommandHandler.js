@@ -5,10 +5,11 @@ const CategoryService = require('../services/CategoryService');
 const moment = require('moment');
 
 class CommandHandler {
-    constructor(database, aiService, client) {
+    constructor(database, aiService, client, indonesianAI = null) {
         this.db = database;
         this.ai = aiService;
         this.client = client;
+        this.indonesianAI = indonesianAI;
         this.logger = new Logger();
         
         // Initialize services
@@ -168,7 +169,7 @@ class CommandHandler {
                 return;
             }
             
-            const parsed = await this.ai.parseNaturalLanguageTransaction(text, userPhone);
+            const parsed = await this.ai.parseNaturalLanguageTransaction(text, userPhone, this.indonesianAI);
             
             if (parsed && parsed.confidence > 0.7) {
                 // Check transaction limit before processing
@@ -1322,7 +1323,7 @@ Permen 2k
             // Try to parse as bulk transaction
             await message.reply('🤖 Mendeteksi multiple transaksi, memproses dengan bulk AI...');
             
-            const bulkResult = await this.ai.parseBulkTransactions(text, userPhone);
+            const bulkResult = await this.ai.parseBulkTransactions(text, userPhone, this.indonesianAI);
 
             if (bulkResult.error || bulkResult.totalTransactions === 0) {
                 // If bulk parsing fails, let single transaction parsing handle it

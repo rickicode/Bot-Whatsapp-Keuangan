@@ -17,14 +17,15 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 
 ### Core Financial Management
 - ✅ **Income & Expense Tracking** - Simple commands to record transactions
-- ✅ **Debt & Receivables Management** - Track what you owe and what others owe you
-- ✅ **Bill Reminders** - Automated reminders for recurring payments
 - ✅ **Category Management** - Organize transactions with custom categories
 - ✅ **Balance & Reports** - Real-time balance and detailed financial reports
+- ✅ **Transaction Search & Edit** - Find and modify transactions easily
+- ✅ **Bulk Transaction Processing** - Add multiple transactions at once with AI
 
 ### AI-Powered Features (DeepSeek Integration)
 - 🤖 **Natural Language Processing** - "I spent 50k for lunch today"
 - 🤖 **Smart Categorization** - AI suggests appropriate categories
+- 🤖 **Auto-Capitalize Descriptions** - "habis jajan sate ayam 10k" → "Jajan Sate Ayam"
 - 🤖 **Financial Analysis** - AI-powered spending pattern analysis
 - 🤖 **Cash Flow Predictions** - AI-based financial forecasting
 - 🤖 **Financial Advice** - Personalized recommendations
@@ -34,10 +35,10 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 - 📊 **Comprehensive Reporting** - Daily, weekly, monthly, yearly reports
 - 💾 **Data Export** - CSV exports for accounting software
 - 🔄 **Automated Backups** - Scheduled database backups
-- 🔔 **Smart Reminders** - Bill payment and debt collection reminders
 - 🏷️ **Flexible Categories** - Custom income and expense categories
 - 📱 **Multi-Currency Support** - Handle different currencies
 - 🔐 **Security** - Encrypted data storage and user authentication
+- 🔍 **Smart Search** - Find transactions by amount, description, or category
 
 ### 🛡️ Anti-Banned Features (NEW!)
 - 🤖 **Bot Pattern Detection** - Detects and prevents bot-like behavior
@@ -219,11 +220,13 @@ ENABLE_REMINDERS=true
 /kategori-baru Food expense  # Add new category
 ```
 
-### Debt Management
+### Bulk Transactions (NEW!)
 ```
-/hutang 1000000 John "Web project" 2024-12-31
-/bayar-hutang John 500000
-/hutang-list
+/bulk Habis belanja baju 33k
+Mainan anak 30k
+Galon + kopi 20k
+Parkir 2k
+Permen 2k
 ```
 
 ### AI Commands
@@ -232,6 +235,7 @@ ENABLE_REMINDERS=true
 /saran            # AI financial advice
 /chat How can I save more money?
 /prediksi-ai      # AI cash flow prediction
+/ringkasan-ai     # AI financial summary
 /kategori-otomatis # Auto-categorize transactions
 ```
 
@@ -239,16 +243,26 @@ ENABLE_REMINDERS=true
 ```
 /edit 123         # Edit transaction ID 123
 /hapus 123        # Delete transaction ID 123
+/cari makan       # Search transactions by keyword
 /backup           # Create backup
 /export           # Export to CSV
 ```
 
-### Natural Language
+### Natural Language & Bulk Processing
 Just type naturally:
 ```
 "I spent 50000 for lunch today"
 "Received 500000 from client payment"
 "Bought groceries for 75000"
+
+# With auto-capitalize feature:
+"habis jajan sate ayam 10k" → Saved as "Jajan Sate Ayam"
+"beli kopi susu 15k" → Saved as "Kopi Susu"
+"bayar internet bulan ini 300k" → Saved as "Internet Bulan Ini"
+
+# Bulk transactions (AI auto-detects multiple transactions):
+"Hari ini beli kopi 25k, makan siang 50k, bensin 100k"
+"Belanja: beras 50k, telur 30k, sayur 20k"
 ```
 
 ## 📡 REST API & Webhook Integration
@@ -429,20 +443,18 @@ The bot uses DeepSeek AI for intelligent features:
 ### Database Schema
 
 ```sql
--- Users
-users (id, phone, name, timezone, default_currency, created_at)
+-- Users & Authentication
+users (id, phone, name, email, city, timezone, is_active, is_admin, created_at)
 
--- Categories  
+-- Subscription Management
+user_subscriptions (user_phone, plan_name, transaction_count, last_reset_date, payment_status)
+subscription_plans (name, display_name, monthly_transaction_limit, price, features)
+
+-- Categories
 categories (id, user_phone, name, type, color, is_active)
 
 -- Transactions
-transactions (id, user_phone, type, amount, category_id, description, date)
-
--- Debts/Receivables
-debts (id, user_phone, client_id, type, amount, paid_amount, status, due_date)
-
--- Bills/Reminders
-bills (id, user_phone, name, amount, due_date, frequency, next_reminder)
+transactions (id, user_phone, type, amount, category_id, description, date, created_at)
 
 -- AI Interactions
 ai_interactions (id, user_phone, prompt, response, type, created_at)
@@ -463,8 +475,10 @@ whatsapp-financial-bot/
 │   │   ├── AIService.js
 │   │   ├── TransactionService.js
 │   │   ├── ReportService.js
-│   │   ├── DebtService.js
 │   │   ├── CategoryService.js
+│   │   ├── IndonesianAIAssistant.js
+│   │   ├── MessagingAPIService.js
+│   │   ├── QRCodeService.js
 │   │   └── ReminderService.js
 │   └── utils/
 │       └── Logger.js
