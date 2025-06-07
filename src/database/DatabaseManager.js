@@ -74,21 +74,11 @@ class DatabaseManager {
     // User management
     async createUser(phone, name = null) {
         try {
-            const dbType = this.getDatabaseType();
-            
-            if (dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase') {
-                // Just insert the user - categories are now global
-                await this.run(
-                    'INSERT INTO users (phone, name, timezone) VALUES ($1, $2, $3) ON CONFLICT (phone) DO NOTHING',
-                    [phone, name, 'Asia/Jakarta']
-                );
-            } else {
-                // SQLite syntax
-                await this.run(
-                    'INSERT OR IGNORE INTO users (phone, name, timezone) VALUES (?, ?, ?)',
-                    [phone, name, 'Asia/Jakarta']
-                );
-            }
+            // PostgreSQL - Just insert the user - categories are now global
+            await this.run(
+                'INSERT INTO users (phone, name, timezone) VALUES ($1, $2, $3) ON CONFLICT (phone) DO NOTHING',
+                [phone, name, 'Asia/Jakarta']
+            );
             
             // Only log detailed user creation in debug mode
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
@@ -102,21 +92,12 @@ class DatabaseManager {
     }
 
     async getUser(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.get('SELECT * FROM users WHERE phone = $1', [phone]);
-        } else {
-            return await this.get('SELECT * FROM users WHERE phone = ?', [phone]);
-        }
+        return await this.get('SELECT * FROM users WHERE phone = $1', [phone]);
     }
 
     // Transaction methods
     async addTransaction(userPhone, type, amount, categoryId, description, date = null) {
         try {
-            const dbType = this.getDatabaseType();
-            const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
             const transactionDate = date || new Date().toISOString().split('T')[0];
             
             // Only log transaction details in debug mode
@@ -125,58 +106,30 @@ class DatabaseManager {
             }
             
             // Verify user exists
-            if (isPostgres) {
-                const userExists = await this.get('SELECT phone FROM users WHERE phone = $1', [userPhone]);
-                if (!userExists) {
-                    this.logger.error(`User ${userPhone} does not exist in database`);
-                    throw new Error(`User ${userPhone} not found`);
-                }
-                
-                // Verify category exists
-                const categoryExists = await this.get('SELECT id FROM categories WHERE id = $1', [categoryId]);
-                if (!categoryExists) {
-                    this.logger.error(`Category ${categoryId} does not exist in database`);
-                    throw new Error(`Category ${categoryId} not found`);
-                }
-                
-                const result = await this.run(
-                    `INSERT INTO transactions (user_phone, type, amount, category_id, description, date)
-                     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-                    [userPhone, type, amount, categoryId, description, transactionDate]
-                );
-                
-                // Only log detailed transaction info in debug mode
-                if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
-                    this.logger.info(`✅ Transaction inserted successfully with ID: ${result.lastID}`);
-                }
-                return result.lastID;
-            } else {
-                // SQLite syntax
-                const userExists = await this.get('SELECT phone FROM users WHERE phone = ?', [userPhone]);
-                if (!userExists) {
-                    this.logger.error(`User ${userPhone} does not exist in database`);
-                    throw new Error(`User ${userPhone} not found`);
-                }
-                
-                // Verify category exists
-                const categoryExists = await this.get('SELECT id FROM categories WHERE id = ?', [categoryId]);
-                if (!categoryExists) {
-                    this.logger.error(`Category ${categoryId} does not exist in database`);
-                    throw new Error(`Category ${categoryId} not found`);
-                }
-                
-                const result = await this.run(
-                    `INSERT INTO transactions (user_phone, type, amount, category_id, description, date)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-                    [userPhone, type, amount, categoryId, description, transactionDate]
-                );
-                
-                // Only log detailed transaction info in debug mode
-                if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
-                    this.logger.info(`✅ Transaction inserted successfully with ID: ${result.lastID}`);
-                }
-                return result.lastID;
+            const userExists = await this.get('SELECT phone FROM users WHERE phone = $1', [userPhone]);
+            if (!userExists) {
+                this.logger.error(`User ${userPhone} does not exist in database`);
+                throw new Error(`User ${userPhone} not found`);
             }
+            
+            // Verify category exists
+            const categoryExists = await this.get('SELECT id FROM categories WHERE id = $1', [categoryId]);
+            if (!categoryExists) {
+                this.logger.error(`Category ${categoryId} does not exist in database`);
+                throw new Error(`Category ${categoryId} not found`);
+            }
+            
+            const result = await this.run(
+                `INSERT INTO transactions (user_phone, type, amount, category_id, description, date)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [userPhone, type, amount, categoryId, description, transactionDate]
+            );
+            
+            // Only log detailed transaction info in debug mode
+            if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
+                this.logger.info(`✅ Transaction inserted successfully with ID: ${result.lastID}`);
+            }
+            return result.lastID;
         } catch (error) {
             this.logger.error('❌ Error in addTransaction:', error);
             this.logger.error('Parameters:', { userPhone, type, amount, categoryId, description, date });
@@ -185,58 +138,29 @@ class DatabaseManager {
     }
 
     async getTransactions(userPhone, limit = 50, offset = 0) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.all(`
-                SELECT t.*, c.name as category_name, c.color as category_color
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = $1
-                ORDER BY t.date DESC, t.created_at DESC
-                LIMIT $2 OFFSET $3
-            `, [userPhone, limit, offset]);
-        } else {
-            return await this.all(`
-                SELECT t.*, c.name as category_name, c.color as category_color
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = ?
-                ORDER BY t.date DESC, t.created_at DESC
-                LIMIT ? OFFSET ?
-            `, [userPhone, limit, offset]);
-        }
+        return await this.all(`
+            SELECT t.*, c.name as category_name, c.color as category_color
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.user_phone = $1
+            ORDER BY t.date DESC, t.created_at DESC
+            LIMIT $2 OFFSET $3
+        `, [userPhone, limit, offset]);
     }
 
     async getTransactionById(id, userPhone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.get(`
-                SELECT t.*, c.name as category_name
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.id = $1 AND t.user_phone = $2
-            `, [id, userPhone]);
-        } else {
-            return await this.get(`
-                SELECT t.*, c.name as category_name
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.id = ? AND t.user_phone = ?
-            `, [id, userPhone]);
-        }
+        return await this.get(`
+            SELECT t.*, c.name as category_name
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.id = $1 AND t.user_phone = $2
+        `, [id, userPhone]);
     }
 
     async updateTransaction(id, userPhone, updates) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql';
-        
         let paramCount = 1;
         const fields = Object.keys(updates).map(key => {
-            return `${key} = ${isPostgres ? '$' + paramCount++ : '?'}`;
+            return `${key} = $${paramCount++}`;
         }).join(', ');
         
         const values = Object.values(updates);
@@ -244,68 +168,35 @@ class DatabaseManager {
         
         await this.run(
             `UPDATE transactions SET ${fields}, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ${isPostgres ? '$' + paramCount++ : '?'}
-             AND user_phone = ${isPostgres ? '$' + paramCount : '?'}`,
+             WHERE id = $${paramCount++}
+             AND user_phone = $${paramCount}`,
             values
         );
     }
 
     async deleteTransaction(id, userPhone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                'DELETE FROM transactions WHERE id = $1 AND user_phone = $2',
-                [id, userPhone]
-            );
-        } else {
-            await this.run(
-                'DELETE FROM transactions WHERE id = ? AND user_phone = ?',
-                [id, userPhone]
-            );
-        }
+        await this.run(
+            'DELETE FROM transactions WHERE id = $1 AND user_phone = $2',
+            [id, userPhone]
+        );
     }
 
     // Category methods (Fixed/Global categories only)
     async getCategories(userPhone = null, type = null) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
+        let sql = 'SELECT * FROM categories WHERE is_active = true';
+        let params = [];
         
-        if (isPostgres) {
-            let sql = 'SELECT * FROM categories WHERE is_active = true';
-            let params = [];
-            
-            if (type) {
-                sql += ' AND type = $1';
-                params.push(type);
-            }
-            
-            sql += ' ORDER BY name';
-            return await this.all(sql, params);
-        } else {
-            let sql = 'SELECT * FROM categories WHERE is_active = true';
-            let params = [];
-            
-            if (type) {
-                sql += ' AND type = ?';
-                params.push(type);
-            }
-            
-            sql += ' ORDER BY name';
-            return await this.all(sql, params);
+        if (type) {
+            sql += ' AND type = $1';
+            params.push(type);
         }
+        
+        sql += ' ORDER BY name';
+        return await this.all(sql, params);
     }
 
     async getCategoryById(id) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.get('SELECT * FROM categories WHERE id = $1', [id]);
-        } else {
-            return await this.get('SELECT * FROM categories WHERE id = ?', [id]);
-        }
+        return await this.get('SELECT * FROM categories WHERE id = $1', [id]);
     }
 
     // Admin-only category management for global categories
@@ -316,22 +207,11 @@ class DatabaseManager {
             throw new Error('Hanya admin yang dapat menambahkan kategori baru.');
         }
 
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            const result = await this.run(
-                'INSERT INTO categories (name, type, color) VALUES ($1, $2, $3) RETURNING id',
-                [name, type, color]
-            );
-            return result.lastID;
-        } else {
-            const result = await this.run(
-                'INSERT INTO categories (name, type, color) VALUES (?, ?, ?)',
-                [name, type, color]
-            );
-            return result.lastID;
-        }
+        const result = await this.run(
+            'INSERT INTO categories (name, type, color) VALUES ($1, $2, $3) RETURNING id',
+            [name, type, color]
+        );
+        return result.lastID;
     }
 
     // Admin-only category editing
@@ -342,19 +222,16 @@ class DatabaseManager {
             throw new Error('Hanya admin yang dapat mengedit kategori.');
         }
 
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         let paramCount = 1;
         const fields = Object.keys(updates).map(key => {
-            return `${key} = ${isPostgres ? '$' + paramCount++ : '?'}`;
+            return `${key} = $${paramCount++}`;
         }).join(', ');
         
         const values = Object.values(updates);
         values.push(categoryId);
         
         await this.run(
-            `UPDATE categories SET ${fields} WHERE id = ${isPostgres ? '$' + paramCount : '?'}`,
+            `UPDATE categories SET ${fields} WHERE id = $${paramCount}`,
             values
         );
     }
@@ -367,47 +244,34 @@ class DatabaseManager {
             throw new Error('Hanya admin yang dapat menghapus kategori.');
         }
 
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         // Soft delete - just deactivate the category
-        if (isPostgres) {
-            await this.run(
-                'UPDATE categories SET is_active = false WHERE id = $1',
-                [categoryId]
-            );
-        } else {
-            await this.run(
-                'UPDATE categories SET is_active = false WHERE id = ?',
-                [categoryId]
-            );
-        }
+        await this.run(
+            'UPDATE categories SET is_active = false WHERE id = $1',
+            [categoryId]
+        );
     }
 
     // Balance calculation
     async getBalance(userPhone, endDate = null) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql';
-        
         let dateFilter = '';
         let params = [userPhone];
         
         if (endDate) {
-            dateFilter = `AND date <= ${isPostgres ? '$2' : '?'}`;
+            dateFilter = 'AND date <= $2';
             params.push(endDate);
         }
         
         const income = await this.get(`
             SELECT COALESCE(SUM(amount), 0) as total
             FROM transactions
-            WHERE user_phone = ${isPostgres ? '$1' : '?'}
+            WHERE user_phone = $1
             AND type = 'income' ${dateFilter}
         `, params);
         
         const expenses = await this.get(`
             SELECT COALESCE(SUM(amount), 0) as total
             FROM transactions
-            WHERE user_phone = ${isPostgres ? '$1' : '?'}
+            WHERE user_phone = $1
             AND type = 'expense' ${dateFilter}
         `, params);
         
@@ -421,7 +285,7 @@ class DatabaseManager {
     // Client management (for debt tracking)
     async addClient(userPhone, name, phone = null, email = null, notes = null) {
         const result = await this.run(
-            'INSERT INTO clients (user_phone, name, phone, email, notes) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO clients (user_phone, name, phone, email, notes) VALUES ($1, $2, $3, $4, $5)',
             [userPhone, name, phone, email, notes]
         );
         return result.lastID;
@@ -429,14 +293,14 @@ class DatabaseManager {
 
     async getClients(userPhone) {
         return await this.all(
-            'SELECT * FROM clients WHERE user_phone = ? ORDER BY name',
+            'SELECT * FROM clients WHERE user_phone = $1 ORDER BY name',
             [userPhone]
         );
     }
 
     async getClientByName(userPhone, name) {
         return await this.get(
-            'SELECT * FROM clients WHERE user_phone = ? AND name = ?',
+            'SELECT * FROM clients WHERE user_phone = $1 AND name = $2',
             [userPhone, name]
         );
     }
@@ -444,7 +308,7 @@ class DatabaseManager {
     // Debt management
     async addDebt(userPhone, clientId, type, amount, description, dueDate = null) {
         const result = await this.run(
-            'INSERT INTO debts (user_phone, client_id, type, amount, description, due_date) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO debts (user_phone, client_id, type, amount, description, due_date) VALUES ($1, $2, $3, $4, $5, $6)',
             [userPhone, clientId, type, amount, description, dueDate]
         );
         return result.lastID;
@@ -452,15 +316,15 @@ class DatabaseManager {
 
     async getDebts(userPhone, status = null) {
         let sql = `
-            SELECT d.*, c.name as client_name, c.phone as client_phone 
-            FROM debts d 
-            JOIN clients c ON d.client_id = c.id 
-            WHERE d.user_phone = ?
+            SELECT d.*, c.name as client_name, c.phone as client_phone
+            FROM debts d
+            JOIN clients c ON d.client_id = c.id
+            WHERE d.user_phone = $1
         `;
         let params = [userPhone];
         
         if (status) {
-            sql += ' AND d.status = ?';
+            sql += ' AND d.status = $2';
             params.push(status);
         }
         
@@ -471,7 +335,7 @@ class DatabaseManager {
 
     async updateDebtPayment(debtId, userPhone, paidAmount) {
         const debt = await this.get(
-            'SELECT * FROM debts WHERE id = ? AND user_phone = ?',
+            'SELECT * FROM debts WHERE id = $1 AND user_phone = $2',
             [debtId, userPhone]
         );
         
@@ -487,7 +351,7 @@ class DatabaseManager {
         }
         
         await this.run(
-            'UPDATE debts SET paid_amount = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            'UPDATE debts SET paid_amount = $1, status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
             [newPaidAmount, status, debtId]
         );
         
@@ -497,7 +361,7 @@ class DatabaseManager {
     // Bills management
     async addBill(userPhone, name, amount, categoryId, dueDate, frequency = 'monthly') {
         const result = await this.run(
-            'INSERT INTO bills (user_phone, name, amount, category_id, due_date, frequency) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO bills (user_phone, name, amount, category_id, due_date, frequency) VALUES ($1, $2, $3, $4, $5, $6)',
             [userPhone, name, amount, categoryId, dueDate, frequency]
         );
         return result.lastID;
@@ -505,47 +369,37 @@ class DatabaseManager {
 
     async getBills(userPhone, isActive = true) {
         return await this.all(`
-            SELECT b.*, c.name as category_name 
-            FROM bills b 
-            LEFT JOIN categories c ON b.category_id = c.id 
-            WHERE b.user_phone = ? AND b.is_active = ?
+            SELECT b.*, c.name as category_name
+            FROM bills b
+            LEFT JOIN categories c ON b.category_id = c.id
+            WHERE b.user_phone = $1 AND b.is_active = $2
             ORDER BY b.due_date ASC
-        `, [userPhone, isActive ? 1 : 0]);
+        `, [userPhone, isActive]);
     }
 
     // Settings management
     async getSetting(userPhone, key) {
         const result = await this.get(
-            'SELECT setting_value FROM settings WHERE user_phone = ? AND setting_key = ?',
+            'SELECT setting_value FROM settings WHERE user_phone = $1 AND setting_key = $2',
             [userPhone, key]
         );
         return result ? result.setting_value : null;
     }
 
     async setSetting(userPhone, key, value) {
-        const dbType = this.getDatabaseType();
-        
-        if (dbType === 'postgres' || dbType === 'postgresql') {
-            await this.run(
-                `INSERT INTO settings (user_phone, setting_key, setting_value, updated_at)
-                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-                 ON CONFLICT (user_phone, setting_key)
-                 DO UPDATE SET setting_value = $3, updated_at = CURRENT_TIMESTAMP`,
-                [userPhone, key, value]
-            );
-        } else {
-            await this.run(
-                `INSERT OR REPLACE INTO settings (user_phone, setting_key, setting_value, updated_at)
-                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-                [userPhone, key, value]
-            );
-        }
+        await this.run(
+            `INSERT INTO settings (user_phone, setting_key, setting_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (user_phone, setting_key)
+             DO UPDATE SET setting_value = $3, updated_at = CURRENT_TIMESTAMP`,
+            [userPhone, key, value]
+        );
     }
 
     // AI interactions log
     async logAIInteraction(userPhone, prompt, response, type = 'general') {
         const result = await this.run(
-            'INSERT INTO ai_interactions (user_phone, prompt, response, type) VALUES (?, ?, ?, ?)',
+            'INSERT INTO ai_interactions (user_phone, prompt, response, type) VALUES ($1, $2, $3, $4)',
             [userPhone, prompt, response, type]
         );
         return result.lastID;
@@ -553,171 +407,81 @@ class DatabaseManager {
 
     async getAIInteractions(userPhone, limit = 50) {
         return await this.all(
-            'SELECT * FROM ai_interactions WHERE user_phone = ? ORDER BY created_at DESC LIMIT ?',
+            'SELECT * FROM ai_interactions WHERE user_phone = $1 ORDER BY created_at DESC LIMIT $2',
             [userPhone, limit]
         );
     }
 
-    // Backup functionality - depends on database type
+    // Backup functionality for PostgreSQL
     async backup() {
         try {
-            const dbType = process.env.DATABASE_TYPE || 'sqlite3';
-            
-            if (dbType === 'sqlite3') {
-                const fs = require('fs-extra');
-                const path = require('path');
-                
-                const backupDir = process.env.BACKUP_PATH || './backups';
-                await fs.ensureDir(backupDir);
-                
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                const backupPath = path.join(backupDir, `financial_backup_${timestamp}.db`);
-                
-                const dbPath = process.env.DB_PATH || './data/financial.db';
-                await fs.copy(dbPath, backupPath);
-                
-                this.logger.info(`Database backed up to: ${backupPath}`);
-                return backupPath;
-            } else {
-                throw new Error('Backup not yet implemented for PostgreSQL. Use pg_dump instead.');
-            }
+            // For PostgreSQL, recommend using pg_dump
+            throw new Error('Backup not yet implemented for PostgreSQL. Use pg_dump instead.\n\nExample: pg_dump -h hostname -U username -d database_name > backup.sql');
         } catch (error) {
             this.logger.error('Backup failed:', error);
             throw error;
         }
     }
 
-    // Database type info
-    getDatabaseType() {
-        return process.env.DATABASE_TYPE || 'sqlite3';
-    }
 
     // User Registration Management
     async getUserRegistrationStatus(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.get(
-                'SELECT phone, name, email, city, registration_completed, is_active FROM users WHERE phone = $1',
-                [phone]
-            );
-        } else {
-            return await this.get(
-                'SELECT phone, name, email, city, registration_completed, is_active FROM users WHERE phone = ?',
-                [phone]
-            );
-        }
+        return await this.get(
+            'SELECT phone, name, email, city, registration_completed, is_active FROM users WHERE phone = $1',
+            [phone]
+        );
     }
 
     async createRegistrationSession(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                `INSERT INTO registration_sessions (phone, step, session_data, expires_at)
-                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours')
-                 ON CONFLICT (phone) DO UPDATE SET
-                 step = $2, session_data = $3, expires_at = CURRENT_TIMESTAMP + INTERVAL '24 hours', created_at = CURRENT_TIMESTAMP`,
-                [phone, 'name', '{}']
-            );
-        } else {
-            // For SQLite, we'll use a simpler approach
-            await this.run(
-                `INSERT OR REPLACE INTO registration_sessions (phone, step, session_data, expires_at)
-                 VALUES (?, ?, ?, datetime('now', '+24 hours'))`,
-                [phone, 'name', '{}']
-            );
-        }
+        await this.run(
+            `INSERT INTO registration_sessions (phone, step, session_data, expires_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours')
+             ON CONFLICT (phone) DO UPDATE SET
+             step = $2, session_data = $3, expires_at = CURRENT_TIMESTAMP + INTERVAL '24 hours', created_at = CURRENT_TIMESTAMP`,
+            [phone, 'name', '{}']
+        );
     }
 
     async getRegistrationSession(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.get(
-                'SELECT * FROM registration_sessions WHERE phone = $1 AND expires_at > CURRENT_TIMESTAMP',
-                [phone]
-            );
-        } else {
-            return await this.get(
-                "SELECT * FROM registration_sessions WHERE phone = ? AND expires_at > datetime('now')",
-                [phone]
-            );
-        }
+        return await this.get(
+            'SELECT * FROM registration_sessions WHERE phone = $1 AND expires_at > CURRENT_TIMESTAMP',
+            [phone]
+        );
     }
 
     async updateRegistrationSession(phone, step, sessionData) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                'UPDATE registration_sessions SET step = $1, session_data = $2 WHERE phone = $3',
-                [step, JSON.stringify(sessionData), phone]
-            );
-        } else {
-            await this.run(
-                'UPDATE registration_sessions SET step = ?, session_data = ? WHERE phone = ?',
-                [step, JSON.stringify(sessionData), phone]
-            );
-        }
+        await this.run(
+            'UPDATE registration_sessions SET step = $1, session_data = $2 WHERE phone = $3',
+            [step, JSON.stringify(sessionData), phone]
+        );
     }
 
     async completeUserRegistration(phone, name, email, city) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         try {
             await this.beginTransaction();
             
             // Update user with complete registration data
-            if (isPostgres) {
+            await this.run(
+                `INSERT INTO users (phone, name, email, city, timezone, registration_completed, is_active)
+                 VALUES ($1, $2, $3, $4, $5, true, true)
+                 ON CONFLICT (phone) DO UPDATE SET
+                 name = $2, email = $3, city = $4, registration_completed = true, is_active = true`,
+                [phone, name, email, city, 'Asia/Jakarta']
+            );
+            
+            // Create default free subscription
+            const freePlan = await this.get('SELECT id FROM subscription_plans WHERE name = $1', ['free']);
+            if (freePlan) {
                 await this.run(
-                    `INSERT INTO users (phone, name, email, city, timezone, registration_completed, is_active)
-                     VALUES ($1, $2, $3, $4, $5, true, true)
-                     ON CONFLICT (phone) DO UPDATE SET
-                     name = $2, email = $3, city = $4, registration_completed = true, is_active = true`,
-                    [phone, name, email, city, 'Asia/Jakarta']
+                    `INSERT INTO user_subscriptions (user_phone, plan_id, status, transaction_count, last_reset_date)
+                     VALUES ($1, $2, $3, 0, CURRENT_DATE)
+                     ON CONFLICT (user_phone) DO NOTHING`,
+                    [phone, freePlan.id, 'active']
                 );
-                
-                // Create default free subscription
-                const freePlan = await this.get('SELECT id FROM subscription_plans WHERE name = $1', ['free']);
-                if (freePlan) {
-                    await this.run(
-                        `INSERT INTO user_subscriptions (user_phone, plan_id, status, transaction_count, last_reset_date)
-                         VALUES ($1, $2, $3, 0, CURRENT_DATE)
-                         ON CONFLICT (user_phone) DO NOTHING`,
-                        [phone, freePlan.id, 'active']
-                    );
-                }
-                
-                // Delete registration session
-                await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
-            } else {
-                // SQLite implementation
-                await this.run(
-                    `INSERT OR REPLACE INTO users (phone, name, email, city, timezone, registration_completed, is_active)
-                     VALUES (?, ?, ?, ?, ?, 1, 1)`,
-                    [phone, name, email, city, 'Asia/Jakarta']
-                );
-                
-                // Create default free subscription
-                const freePlan = await this.get('SELECT id FROM subscription_plans WHERE name = ?', ['free']);
-                if (freePlan) {
-                    await this.run(
-                        `INSERT INTO user_subscriptions (user_phone, plan_id, status, transaction_count, last_reset_date)
-                        VALUES (?, ?, ?, 0, CURRENT_DATE)
-                        ON CONFLICT (user_phone) DO NOTHING`,
-                        [phone, freePlan.id, 'active']
-                    );
-                }
-                
-                // Delete registration session
-                await this.run('DELETE FROM registration_sessions WHERE phone = ?', [phone]);
             }
+            
+            // Delete registration session
+            await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
             
             await this.commit();
             
@@ -739,14 +503,7 @@ class DatabaseManager {
     }
 
     async deleteRegistrationSession(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
-        } else {
-            await this.run('DELETE FROM registration_sessions WHERE phone = ?', [phone]);
-        }
+        await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
     }
 
     // Categories are now global - no need to copy per user
@@ -758,26 +515,13 @@ class DatabaseManager {
 
     // Subscription Management
     async getUserSubscription(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.get(`
-                SELECT us.*, sp.name as plan_name, sp.display_name, sp.description,
-                       sp.monthly_transaction_limit, sp.features
-                FROM user_subscriptions us
-                JOIN subscription_plans sp ON us.plan_id = sp.id
-                WHERE us.user_phone = $1
-            `, [phone]);
-        } else {
-            return await this.get(`
-                SELECT us.*, sp.name as plan_name, sp.display_name, sp.description,
-                       sp.monthly_transaction_limit, sp.features
-                FROM user_subscriptions us
-                JOIN subscription_plans sp ON us.plan_id = sp.id
-                WHERE us.user_phone = ?
-            `, [phone]);
-        }
+        return await this.get(`
+            SELECT us.*, sp.name as plan_name, sp.display_name, sp.description,
+                   sp.monthly_transaction_limit, sp.features
+            FROM user_subscriptions us
+            JOIN subscription_plans sp ON us.plan_id = sp.id
+            WHERE us.user_phone = $1
+        `, [phone]);
     }
 
     async checkTransactionLimit(phone) {
@@ -820,41 +564,19 @@ class DatabaseManager {
     }
 
     async incrementTransactionCount(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                'UPDATE user_subscriptions SET transaction_count = transaction_count + 1 WHERE user_phone = $1',
-                [phone]
-            );
-        } else {
-            await this.run(
-                'UPDATE user_subscriptions SET transaction_count = transaction_count + 1 WHERE user_phone = ?',
-                [phone]
-            );
-        }
+        await this.run(
+            'UPDATE user_subscriptions SET transaction_count = transaction_count + 1 WHERE user_phone = $1',
+            [phone]
+        );
     }
 
     async checkAndResetDailyCount(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                `UPDATE user_subscriptions
-                 SET transaction_count = 0, last_reset_date = CURRENT_DATE
-                 WHERE user_phone = $1 AND (last_reset_date < CURRENT_DATE OR last_reset_date IS NULL)`,
-                [phone]
-            );
-        } else {
-            await this.run(
-                `UPDATE user_subscriptions
-                 SET transaction_count = 0, last_reset_date = CURRENT_DATE
-                 WHERE user_phone = ? AND (last_reset_date < CURRENT_DATE OR last_reset_date IS NULL)`,
-                [phone]
-            );
-        }
+        await this.run(
+            `UPDATE user_subscriptions
+             SET transaction_count = 0, last_reset_date = CURRENT_DATE
+             WHERE user_phone = $1 AND (last_reset_date < CURRENT_DATE OR last_reset_date IS NULL)`,
+            [phone]
+        );
     }
 
     async resetMonthlyTransactionCount(phone) {
@@ -863,45 +585,22 @@ class DatabaseManager {
     }
 
     async updateLastActivity(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                'UPDATE users SET last_activity = CURRENT_TIMESTAMP WHERE phone = $1',
-                [phone]
-            );
-        } else {
-            await this.run(
-                "UPDATE users SET last_activity = datetime('now') WHERE phone = ?",
-                [phone]
-            );
-        }
+        await this.run(
+            'UPDATE users SET last_activity = CURRENT_TIMESTAMP WHERE phone = $1',
+            [phone]
+        );
     }
 
     // Email validation
     async isEmailUnique(email, excludePhone = null) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         let sql, params;
         
         if (excludePhone) {
-            if (isPostgres) {
-                sql = 'SELECT COUNT(*) as count FROM users WHERE email = $1 AND phone != $2';
-                params = [email, excludePhone];
-            } else {
-                sql = 'SELECT COUNT(*) as count FROM users WHERE email = ? AND phone != ?';
-                params = [email, excludePhone];
-            }
+            sql = 'SELECT COUNT(*) as count FROM users WHERE email = $1 AND phone != $2';
+            params = [email, excludePhone];
         } else {
-            if (isPostgres) {
-                sql = 'SELECT COUNT(*) as count FROM users WHERE email = $1';
-                params = [email];
-            } else {
-                sql = 'SELECT COUNT(*) as count FROM users WHERE email = ?';
-                params = [email];
-            }
+            sql = 'SELECT COUNT(*) as count FROM users WHERE email = $1';
+            params = [email];
         }
         
         const result = await this.get(sql, params);
@@ -910,23 +609,12 @@ class DatabaseManager {
 
     // Cleanup expired registration sessions
     async cleanupExpiredRegistrationSessions() {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            const result = await this.run('DELETE FROM registration_sessions WHERE expires_at < CURRENT_TIMESTAMP');
-            return result.changes || 0;
-        } else {
-            const result = await this.run("DELETE FROM registration_sessions WHERE expires_at < datetime('now')");
-            return result.changes || 0;
-        }
+        const result = await this.run('DELETE FROM registration_sessions WHERE expires_at < CURRENT_TIMESTAMP');
+        return result.changes || 0;
     }
 
     // Admin Management
     async isUserAdmin(phone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         // Check if user is admin by phone number from env
         const adminPhone = process.env.USER_ADMIN?.replace(/\+/g, '');
         const userPhoneClean = phone.replace(/\+/g, '');
@@ -936,31 +624,16 @@ class DatabaseManager {
         }
         
         // Check if user is marked as admin in database
-        let user;
-        if (isPostgres) {
-            user = await this.get('SELECT is_admin FROM users WHERE phone = $1', [phone]);
-        } else {
-            user = await this.get('SELECT is_admin FROM users WHERE phone = ?', [phone]);
-        }
+        const user = await this.get('SELECT is_admin FROM users WHERE phone = $1', [phone]);
         
         return user?.is_admin || false;
     }
 
     async setUserAdmin(phone, isAdmin = true) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                'UPDATE users SET is_admin = $1 WHERE phone = $2',
-                [isAdmin, phone]
-            );
-        } else {
-            await this.run(
-                'UPDATE users SET is_admin = ? WHERE phone = ?',
-                [isAdmin ? 1 : 0, phone]
-            );
-        }
+        await this.run(
+            'UPDATE users SET is_admin = $1 WHERE phone = $2',
+            [isAdmin, phone]
+        );
     }
 
     // Auto-promote admin user during registration
@@ -984,37 +657,20 @@ class DatabaseManager {
             throw new Error('Hanya admin yang dapat mengubah plan user.');
         }
 
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         // Get the new plan
-        let plan;
-        if (isPostgres) {
-            plan = await this.get('SELECT * FROM subscription_plans WHERE name = $1', [newPlanName]);
-        } else {
-            plan = await this.get('SELECT * FROM subscription_plans WHERE name = ?', [newPlanName]);
-        }
+        const plan = await this.get('SELECT * FROM subscription_plans WHERE name = $1', [newPlanName]);
         
         if (!plan) {
             throw new Error(`Plan '${newPlanName}' tidak ditemukan.`);
         }
 
         // Update user subscription
-        if (isPostgres) {
-            await this.run(
-                `UPDATE user_subscriptions
-                 SET plan_id = $1, transaction_count = 0, last_reset_date = CURRENT_DATE
-                 WHERE user_phone = $2`,
-                [plan.id, targetPhone]
-            );
-        } else {
-            await this.run(
-                `UPDATE user_subscriptions
-                 SET plan_id = ?, transaction_count = 0, last_reset_date = CURRENT_DATE
-                 WHERE user_phone = ?`,
-                [plan.id, targetPhone]
-            );
-        }
+        await this.run(
+            `UPDATE user_subscriptions
+             SET plan_id = $1, transaction_count = 0, last_reset_date = CURRENT_DATE
+             WHERE user_phone = $2`,
+            [plan.id, targetPhone]
+        );
 
         return plan;
     }
@@ -1027,32 +683,15 @@ class DatabaseManager {
             throw new Error('Hanya admin yang dapat menangguhkan user.');
         }
 
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                'UPDATE users SET is_active = $1 WHERE phone = $2',
-                [!suspend, targetPhone]
-            );
-        } else {
-            await this.run(
-                'UPDATE users SET is_active = ? WHERE phone = ?',
-                [suspend ? 0 : 1, targetPhone]
-            );
-        }
+        await this.run(
+            'UPDATE users SET is_active = $1 WHERE phone = $2',
+            [!suspend, targetPhone]
+        );
     }
 
     // Get all subscription plans
     async getSubscriptionPlans() {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.all('SELECT * FROM subscription_plans ORDER BY name');
-        } else {
-            return await this.all('SELECT * FROM subscription_plans ORDER BY name');
-        }
+        return await this.all('SELECT * FROM subscription_plans ORDER BY name');
     }
 
     // Get user list (admin only) - with ordering options
@@ -1063,9 +702,6 @@ class DatabaseManager {
             throw new Error('Hanya admin yang dapat melihat daftar user.');
         }
 
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
         // Determine order clause
         let orderClause = 'ORDER BY u.name';
         if (orderBy === 'newest') {
@@ -1074,145 +710,70 @@ class DatabaseManager {
             orderClause = 'ORDER BY u.last_activity DESC';
         }
         
-        if (isPostgres) {
-            return await this.all(`
-                SELECT u.phone, u.name, u.email, u.city, u.is_active, u.is_admin, u.registration_completed,
-                       u.created_at, u.last_activity,
-                       sp.display_name as plan_name, us.transaction_count, us.status as subscription_status
-                FROM users u
-                LEFT JOIN user_subscriptions us ON u.phone = us.user_phone
-                LEFT JOIN subscription_plans sp ON us.plan_id = sp.id
-                WHERE u.registration_completed = true
-                ${orderClause}
-                LIMIT $1 OFFSET $2
-            `, [limit, offset]);
-        } else {
-            return await this.all(`
-                SELECT u.phone, u.name, u.email, u.city, u.is_active, u.is_admin, u.registration_completed,
-                       u.created_at, u.last_activity,
-                       sp.display_name as plan_name, us.transaction_count, us.status as subscription_status
-                FROM users u
-                LEFT JOIN user_subscriptions us ON u.phone = us.user_phone
-                LEFT JOIN subscription_plans sp ON us.plan_id = sp.id
-                WHERE u.registration_completed = 1
-                ${orderClause}
-                LIMIT ? OFFSET ?
-            `, [limit, offset]);
-        }
+        return await this.all(`
+            SELECT u.phone, u.name, u.email, u.city, u.is_active, u.is_admin, u.registration_completed,
+                   u.created_at, u.last_activity,
+                   sp.display_name as plan_name, us.transaction_count, us.status as subscription_status
+            FROM users u
+            LEFT JOIN user_subscriptions us ON u.phone = us.user_phone
+            LEFT JOIN subscription_plans sp ON us.plan_id = sp.id
+            WHERE u.registration_completed = true
+            ${orderClause}
+            LIMIT $1 OFFSET $2
+        `, [limit, offset]);
     }
 
     // Reset user daily limit (admin only)
     async resetUserDailyLimit(targetPhone) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            await this.run(
-                `UPDATE user_subscriptions
-                 SET transaction_count = 0, last_reset_date = CURRENT_DATE
-                 WHERE user_phone = $1`,
-                [targetPhone]
-            );
-        } else {
-            await this.run(
-                `UPDATE user_subscriptions
-                 SET transaction_count = 0, last_reset_date = CURRENT_DATE
-                 WHERE user_phone = ?`,
-                [targetPhone]
-            );
-        }
+        await this.run(
+            `UPDATE user_subscriptions
+             SET transaction_count = 0, last_reset_date = CURRENT_DATE
+             WHERE user_phone = $1`,
+            [targetPhone]
+        );
     }
 
     // Get transactions by date range
     async getTransactionsByDateRange(userPhone, startDate, endDate) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.all(`
-                SELECT t.*, c.name as category_name, c.type as category_type
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = $1 AND t.date >= $2 AND t.date <= $3
-                ORDER BY t.date DESC, t.created_at DESC
-            `, [userPhone, startDate, endDate]);
-        } else {
-            return await this.all(`
-                SELECT t.*, c.name as category_name, c.type as category_type
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = ? AND t.date >= ? AND t.date <= ?
-                ORDER BY t.date DESC, t.created_at DESC
-            `, [userPhone, startDate, endDate]);
-        }
+        return await this.all(`
+            SELECT t.*, c.name as category_name, c.type as category_type
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.user_phone = $1 AND t.date >= $2 AND t.date <= $3
+            ORDER BY t.date DESC, t.created_at DESC
+        `, [userPhone, startDate, endDate]);
     }
 
     // Get transactions by specific date
     async getTransactionsByDate(userPhone, date) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-        
-        if (isPostgres) {
-            return await this.all(`
-                SELECT t.*, c.name as category_name, c.type as category_type, c.color as category_color
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = $1 AND t.date = $2
-                ORDER BY t.created_at DESC
-            `, [userPhone, date]);
-        } else {
-            return await this.all(`
-                SELECT t.*, c.name as category_name, c.type as category_type, c.color as category_color
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = ? AND t.date = ?
-                ORDER BY t.created_at DESC
-            `, [userPhone, date]);
-        }
+        return await this.all(`
+            SELECT t.*, c.name as category_name, c.type as category_type, c.color as category_color
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.user_phone = $1 AND t.date = $2
+            ORDER BY t.created_at DESC
+        `, [userPhone, date]);
     }
 
     // Get balance summary by specific date
     async getBalanceByDate(userPhone, date) {
-        const dbType = this.getDatabaseType();
-        const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
+        const income = await this.get(`
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM transactions
+            WHERE user_phone = $1 AND date = $2 AND type = 'income'
+        `, [userPhone, date]);
         
-        if (isPostgres) {
-            const income = await this.get(`
-                SELECT COALESCE(SUM(amount), 0) as total
-                FROM transactions
-                WHERE user_phone = $1 AND date = $2 AND type = 'income'
-            `, [userPhone, date]);
-            
-            const expenses = await this.get(`
-                SELECT COALESCE(SUM(amount), 0) as total
-                FROM transactions
-                WHERE user_phone = $1 AND date = $2 AND type = 'expense'
-            `, [userPhone, date]);
-            
-            return {
-                income: income.total,
-                expenses: expenses.total,
-                balance: income.total - expenses.total
-            };
-        } else {
-            const income = await this.get(`
-                SELECT COALESCE(SUM(amount), 0) as total
-                FROM transactions
-                WHERE user_phone = ? AND date = ? AND type = 'income'
-            `, [userPhone, date]);
-            
-            const expenses = await this.get(`
-                SELECT COALESCE(SUM(amount), 0) as total
-                FROM transactions
-                WHERE user_phone = ? AND date = ? AND type = 'expense'
-            `, [userPhone, date]);
-            
-            return {
-                income: income.total,
-                expenses: expenses.total,
-                balance: income.total - expenses.total
-            };
-        }
+        const expenses = await this.get(`
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM transactions
+            WHERE user_phone = $1 AND date = $2 AND type = 'expense'
+        `, [userPhone, date]);
+        
+        return {
+            income: income.total,
+            expenses: expenses.total,
+            balance: income.total - expenses.total
+        };
     }
 
     // Pool monitoring and health check methods
@@ -1281,53 +842,29 @@ class DatabaseManager {
         try {
             this.logger.info('Dropping all tables...');
             
-            const dbType = this.getDatabaseType();
-            const isPostgres = dbType === 'postgres' || dbType === 'postgresql' || dbType === 'supabase';
-            
-            if (isPostgres) {
-                // PostgreSQL: Drop tables in order to handle foreign key constraints
-                const tables = [
-                    'ai_interactions',
-                    'whatsapp_sessions',
-                    'registration_sessions',
-                    'user_subscriptions',
-                    'settings',
-                    'bills',
-                    'debts',
-                    'clients',
-                    'transactions',
-                    'categories',
-                    'subscription_plans',
-                    'users'
-                ];
+            // PostgreSQL: Drop tables in order to handle foreign key constraints
+            const tables = [
+                'ai_interactions',
+                'whatsapp_sessions',
+                'registration_sessions',
+                'user_subscriptions',
+                'settings',
+                'bills',
+                'debts',
+                'clients',
+                'transactions',
+                'categories',
+                'subscription_plans',
+                'users'
+            ];
 
-                for (const table of tables) {
-                    try {
-                        await this.run(`DROP TABLE IF EXISTS ${table} CASCADE`);
-                        this.logger.info(`Dropped table: ${table}`);
-                    } catch (error) {
-                        this.logger.warn(`Warning dropping table ${table}:`, error.message);
-                    }
+            for (const table of tables) {
+                try {
+                    await this.run(`DROP TABLE IF EXISTS ${table} CASCADE`);
+                    this.logger.info(`Dropped table: ${table}`);
+                } catch (error) {
+                    this.logger.warn(`Warning dropping table ${table}:`, error.message);
                 }
-            } else {
-                // SQLite: Disable foreign keys and drop all tables
-                await this.run('PRAGMA foreign_keys = OFF');
-                
-                const tables = await this.all(`
-                    SELECT name FROM sqlite_master
-                    WHERE type='table' AND name NOT LIKE 'sqlite_%'
-                `);
-                
-                for (const table of tables) {
-                    try {
-                        await this.run(`DROP TABLE IF EXISTS ${table.name}`);
-                        this.logger.info(`Dropped table: ${table.name}`);
-                    } catch (error) {
-                        this.logger.warn(`Warning dropping table ${table.name}:`, error.message);
-                    }
-                }
-                
-                await this.run('PRAGMA foreign_keys = ON');
             }
 
             this.logger.info('All tables dropped successfully');
