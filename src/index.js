@@ -500,7 +500,6 @@ class WhatsAppFinancialBot {
         
         // Log current environment
         this.logger.info(`📍 NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
-        this.logger.info(`📍 DATABASE_TYPE: ${process.env.DATABASE_TYPE || 'not set'}`);
         
         // Check for .env file
         if (fs.existsSync('.env')) {
@@ -520,17 +519,19 @@ class WhatsAppFinancialBot {
             this.logger.info('✅ All required environment variables present');
         }
         
-        // Log database configuration
-        const dbType = process.env.DATABASE_TYPE || 'sqlite3';
-        this.logger.info(`📊 Database type: ${dbType}`);
-        
-        if (dbType === 'sqlite3') {
-            const dbPath = process.env.DB_PATH || './data/financial.db';
-            this.logger.info(`📁 Database path: ${dbPath}`);
-        } else if (dbType === 'postgresql') {
-            const dbHost = process.env.DB_HOST || 'localhost';
-            const dbName = process.env.DB_NAME || 'financial_bot';
-            this.logger.info(`🐘 PostgreSQL: ${dbHost}/${dbName}`);
+        // Log PostgreSQL database configuration
+        const dbUrl = process.env.DATABASE_DB_URL || process.env.SUPABASE_DB_URL;
+        if (dbUrl) {
+            try {
+                const url = new URL(dbUrl);
+                this.logger.info(`🐘 PostgreSQL via URL: ${url.hostname}:${url.port || 5432}/${url.pathname.slice(1)}`);
+            } catch (error) {
+                this.logger.warn(`⚠️  Invalid database URL format: ${error.message}`);
+            }
+        } else {
+            const dbHost = process.env.POSTGRES_HOST || process.env.DATABASE_HOST || 'localhost';
+            const dbName = process.env.POSTGRES_DB || process.env.DATABASE_NAME || 'financial_bot';
+            this.logger.info(`🐘 PostgreSQL via config: ${dbHost}/${dbName}`);
         }
     }
 

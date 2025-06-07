@@ -483,51 +483,6 @@ class PostgresDatabase extends BaseDatabase {
                 FOREIGN KEY (category_id) REFERENCES categories(id)
             )`,
 
-            // Clients table for debt management
-            `CREATE TABLE IF NOT EXISTS clients (
-                id SERIAL PRIMARY KEY,
-                user_phone VARCHAR(20) NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                phone VARCHAR(20),
-                email VARCHAR(255),
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_phone) REFERENCES users(phone),
-                UNIQUE(user_phone, name)
-            )`,
-
-            // Debts/Receivables table
-            `CREATE TABLE IF NOT EXISTS debts (
-                id SERIAL PRIMARY KEY,
-                user_phone VARCHAR(20) NOT NULL,
-                client_id INTEGER NOT NULL,
-                type VARCHAR(15) CHECK(type IN ('receivable', 'payable')) NOT NULL,
-                amount NUMERIC(15,2) NOT NULL,
-                paid_amount NUMERIC(15,2) DEFAULT 0,
-                description TEXT,
-                due_date DATE,
-                status VARCHAR(15) CHECK(status IN ('pending', 'partial', 'paid', 'overdue')) DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_phone) REFERENCES users(phone),
-                FOREIGN KEY (client_id) REFERENCES clients(id)
-            )`,
-
-            // Bills/Recurring transactions table
-            `CREATE TABLE IF NOT EXISTS bills (
-                id SERIAL PRIMARY KEY,
-                user_phone VARCHAR(20) NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                amount NUMERIC(15,2) NOT NULL,
-                category_id INTEGER,
-                due_date DATE NOT NULL,
-                frequency VARCHAR(15) CHECK(frequency IN ('monthly', 'weekly', 'yearly', 'one-time')) DEFAULT 'monthly',
-                next_reminder DATE,
-                is_active BOOLEAN DEFAULT true,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_phone) REFERENCES users(phone),
-                FOREIGN KEY (category_id) REFERENCES categories(id)
-            )`,
 
             // Settings table
             `CREATE TABLE IF NOT EXISTS settings (
@@ -541,16 +496,6 @@ class PostgresDatabase extends BaseDatabase {
                 UNIQUE(user_phone, setting_key)
             )`,
 
-            // AI interactions log
-            `CREATE TABLE IF NOT EXISTS ai_interactions (
-                id SERIAL PRIMARY KEY,
-                user_phone VARCHAR(20) NOT NULL,
-                prompt TEXT NOT NULL,
-                response TEXT,
-                type VARCHAR(50) DEFAULT 'general',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_phone) REFERENCES users(phone)
-            )`,
 
             // WhatsApp sessions table
             `CREATE TABLE IF NOT EXISTS whatsapp_sessions (
@@ -613,10 +558,6 @@ class PostgresDatabase extends BaseDatabase {
                 'CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_phone, date DESC)',
                 'CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id)',
                 'CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at DESC)',
-                'CREATE INDEX IF NOT EXISTS idx_debts_user_status ON debts(user_phone, status)',
-                'CREATE INDEX IF NOT EXISTS idx_debts_due_date ON debts(due_date)',
-                'CREATE INDEX IF NOT EXISTS idx_bills_user_active ON bills(user_phone, is_active)',
-                'CREATE INDEX IF NOT EXISTS idx_bills_next_reminder ON bills(next_reminder)',
                 'CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_updated ON whatsapp_sessions(updated_at)',
                 'CREATE INDEX IF NOT EXISTS idx_registration_sessions_phone ON registration_sessions(phone)',
                 'CREATE INDEX IF NOT EXISTS idx_registration_sessions_expires ON registration_sessions(expires_at)',
@@ -759,7 +700,19 @@ class PostgresDatabase extends BaseDatabase {
                 { name: 'Komisi', type: 'income', color: '#007bff' },
                 { name: 'Hadiah', type: 'income', color: '#6f42c1' },
                 { name: 'Pemasukan Lain', type: 'income', color: '#20c997' },
-                
+                // Additional income categories for lower-income individuals
+                { name: 'Upah Harian', type: 'income', color: '#ffc107' }, // Wage
+                { name: 'Uang Lembur', type: 'income', color: '#fd7e14' }, // Overtime pay
+                { name: 'BLT', type: 'income', color: '#dc3545' }, // Direct Cash Assistance
+                { name: 'Subsidi', type: 'income', color: '#e83e8c' }, // Subsidy
+                { name: 'Bantuan Sosial', type: 'income', color: '#198754' }, // Social Assistance
+                { name: 'Hasil Bertani', type: 'income', color: '#6c757d' }, // Farming income
+                { name: 'Hasil Melaut', type: 'income', color: '#0d6efd' }, // Fishing income
+                { name: 'Pinjaman', type: 'income', color: '#adb5bd' }, // Loan (handle with care)
+                { name: 'Pensiun', type: 'income', color: '#a8a29e' },
+                { name: 'Beasiswa', type: 'income', color: '#4ade80' },
+
+
                 // Essential Expense categories (Pengeluaran Wajib)
                 { name: 'Makanan', type: 'expense', color: '#fd7e14' },
                 { name: 'Transportasi', type: 'expense', color: '#6c757d' },

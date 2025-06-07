@@ -282,100 +282,6 @@ class DatabaseManager {
         };
     }
 
-    // Client management (for debt tracking)
-    async addClient(userPhone, name, phone = null, email = null, notes = null) {
-        const result = await this.run(
-            'INSERT INTO clients (user_phone, name, phone, email, notes) VALUES ($1, $2, $3, $4, $5)',
-            [userPhone, name, phone, email, notes]
-        );
-        return result.lastID;
-    }
-
-    async getClients(userPhone) {
-        return await this.all(
-            'SELECT * FROM clients WHERE user_phone = $1 ORDER BY name',
-            [userPhone]
-        );
-    }
-
-    async getClientByName(userPhone, name) {
-        return await this.get(
-            'SELECT * FROM clients WHERE user_phone = $1 AND name = $2',
-            [userPhone, name]
-        );
-    }
-
-    // Debt management
-    async addDebt(userPhone, clientId, type, amount, description, dueDate = null) {
-        const result = await this.run(
-            'INSERT INTO debts (user_phone, client_id, type, amount, description, due_date) VALUES ($1, $2, $3, $4, $5, $6)',
-            [userPhone, clientId, type, amount, description, dueDate]
-        );
-        return result.lastID;
-    }
-
-    async getDebts(userPhone, status = null) {
-        let sql = `
-            SELECT d.*, c.name as client_name, c.phone as client_phone
-            FROM debts d
-            JOIN clients c ON d.client_id = c.id
-            WHERE d.user_phone = $1
-        `;
-        let params = [userPhone];
-        
-        if (status) {
-            sql += ' AND d.status = $2';
-            params.push(status);
-        }
-        
-        sql += ' ORDER BY d.due_date ASC, d.created_at DESC';
-        
-        return await this.all(sql, params);
-    }
-
-    async updateDebtPayment(debtId, userPhone, paidAmount) {
-        const debt = await this.get(
-            'SELECT * FROM debts WHERE id = $1 AND user_phone = $2',
-            [debtId, userPhone]
-        );
-        
-        if (!debt) {
-            throw new Error('Hutang tidak ditemukan');
-        }
-        
-        const newPaidAmount = debt.paid_amount + paidAmount;
-        let status = 'partial';
-        
-        if (newPaidAmount >= debt.amount) {
-            status = 'paid';
-        }
-        
-        await this.run(
-            'UPDATE debts SET paid_amount = $1, status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
-            [newPaidAmount, status, debtId]
-        );
-        
-        return { newPaidAmount, status, remaining: debt.amount - newPaidAmount };
-    }
-
-    // Bills management
-    async addBill(userPhone, name, amount, categoryId, dueDate, frequency = 'monthly') {
-        const result = await this.run(
-            'INSERT INTO bills (user_phone, name, amount, category_id, due_date, frequency) VALUES ($1, $2, $3, $4, $5, $6)',
-            [userPhone, name, amount, categoryId, dueDate, frequency]
-        );
-        return result.lastID;
-    }
-
-    async getBills(userPhone, isActive = true) {
-        return await this.all(`
-            SELECT b.*, c.name as category_name
-            FROM bills b
-            LEFT JOIN categories c ON b.category_id = c.id
-            WHERE b.user_phone = $1 AND b.is_active = $2
-            ORDER BY b.due_date ASC
-        `, [userPhone, isActive]);
-    }
 
     // Settings management
     async getSetting(userPhone, key) {
@@ -396,32 +302,6 @@ class DatabaseManager {
         );
     }
 
-    // AI interactions log
-    async logAIInteraction(userPhone, prompt, response, type = 'general') {
-        const result = await this.run(
-            'INSERT INTO ai_interactions (user_phone, prompt, response, type) VALUES ($1, $2, $3, $4)',
-            [userPhone, prompt, response, type]
-        );
-        return result.lastID;
-    }
-
-    async getAIInteractions(userPhone, limit = 50) {
-        return await this.all(
-            'SELECT * FROM ai_interactions WHERE user_phone = $1 ORDER BY created_at DESC LIMIT $2',
-            [userPhone, limit]
-        );
-    }
-
-    // Backup functionality for PostgreSQL
-    async backup() {
-        try {
-            // For PostgreSQL, recommend using pg_dump
-            throw new Error('Backup not yet implemented for PostgreSQL. Use pg_dump instead.\n\nExample: pg_dump -h hostname -U username -d database_name > backup.sql');
-        } catch (error) {
-            this.logger.error('Backup failed:', error);
-            throw error;
-        }
-    }
 
 
     // User Registration Management
@@ -776,20 +656,8 @@ class DatabaseManager {
         };
     }
 
-    // Pool monitoring and health check methods
-    async getPoolStats() {
-        if (this.db && typeof this.db.getPoolStats === 'function') {
-            return await this.db.getPoolStats();
-        }
-        return null;
-    }
-
+    // Simple health check
     async healthCheck() {
-        if (this.db && typeof this.db.healthCheck === 'function') {
-            return await this.db.healthCheck();
-        }
-        
-        // Fallback health check for non-PostgreSQL databases
         try {
             await this.get('SELECT 1');
             return {
@@ -802,128 +670,6 @@ class DatabaseManager {
                 error: error.message,
                 timestamp: new Date().toISOString()
             };
-        }
-    }
-
-    // Log pool statistics (useful for monitoring)
-    async logPoolStats() {
-        const stats = await this.getPoolStats();
-        if (stats) {
-            this.logger.info('Database pool stats:', stats);
-        }
-    }
-
-    // Migration functions
-    async migrateFresh() {
-        try {
-            this.logger.info('Starting fresh migration - This will DROP ALL TABLES and recreate them');
-            
-            if (!this.db) {
-                throw new Error('Database belum diinisialisasi');
-            }
-
-            // Call the database-specific fresh migration
-            if (typeof this.db.migrateFresh === 'function') {
-                await this.db.migrateFresh();
-            } else {
-                // Fallback implementation
-                await this.dropAllTables();
-                await this.db.createTables();
-            }
-
-            this.logger.info('Fresh migration completed successfully');
-        } catch (error) {
-            this.logger.error('Error during fresh migration:', error);
-            throw error;
-        }
-    }
-
-    async dropAllTables() {
-        try {
-            this.logger.info('Dropping all tables...');
-            
-            // PostgreSQL: Drop tables in order to handle foreign key constraints
-            const tables = [
-                'ai_interactions',
-                'whatsapp_sessions',
-                'registration_sessions',
-                'user_subscriptions',
-                'settings',
-                'bills',
-                'debts',
-                'clients',
-                'transactions',
-                'categories',
-                'subscription_plans',
-                'users'
-            ];
-
-            for (const table of tables) {
-                try {
-                    await this.run(`DROP TABLE IF EXISTS ${table} CASCADE`);
-                    this.logger.info(`Dropped table: ${table}`);
-                } catch (error) {
-                    this.logger.warn(`Warning dropping table ${table}:`, error.message);
-                }
-            }
-
-            this.logger.info('All tables dropped successfully');
-        } catch (error) {
-            this.logger.error('Error dropping tables:', error);
-            throw error;
-        }
-    }
-
-    // Run database migrations (for schema updates)
-    async migrate() {
-        try {
-            this.logger.info('Running database migrations...');
-            
-            if (!this.db) {
-                throw new Error('Database belum diinisialisasi');
-            }
-
-            // Call the database-specific migration
-            if (typeof this.db.migrate === 'function') {
-                await this.db.migrate();
-            } else {
-                // Fallback - just ensure tables exist
-                await this.db.createTables();
-            }
-
-            this.logger.info('Database migrations completed successfully');
-        } catch (error) {
-            this.logger.error('Error during migration:', error);
-            throw error;
-        }
-    }
-
-    // Seed database with default data
-    async seed() {
-        try {
-            this.logger.info('Seeding database with default data...');
-            
-            if (!this.db) {
-                throw new Error('Database belum diinisialisasi');
-            }
-
-            // Call the database-specific seeding
-            if (typeof this.db.seed === 'function') {
-                await this.db.seed();
-            } else {
-                // Fallback - call insert methods if they exist
-                if (typeof this.db.insertDefaultCategories === 'function') {
-                    await this.db.insertDefaultCategories();
-                }
-                if (typeof this.db.insertDefaultSubscriptionPlans === 'function') {
-                    await this.db.insertDefaultSubscriptionPlans();
-                }
-            }
-
-            this.logger.info('Database seeding completed successfully');
-        } catch (error) {
-            this.logger.error('Error during seeding:', error);
-            throw error;
         }
     }
 }

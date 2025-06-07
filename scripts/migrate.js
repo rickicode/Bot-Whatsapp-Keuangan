@@ -2,26 +2,122 @@
 
 /**
  * Database Migration Script
- * 
+ *
  * Usage:
  *   node scripts/migrate.js fresh        # Drop all tables and recreate (DESTRUCTIVE)
  *   node scripts/migrate.js migrate      # Run migrations (safe updates)
  *   node scripts/migrate.js seed         # Seed database with default data
- * 
+ *
  * Environment:
  *   Reads configuration from .env file or environment variables
  */
 
 const path = require('path');
-const fs = require('fs');
 
 // Load environment variables
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const DatabaseManager = require('../src/database/DatabaseManager');
+const DatabaseFactory = require('../src/database/DatabaseFactory');
 const Logger = require('../src/utils/Logger');
 
 const logger = new Logger();
+
+async function dropAllTables(db) {
+    logger.info('🗑️  Dropping ALL tables in database...');
+    
+    try {
+        // First, get ALL tables that exist in the database
+        const result = await db.all(`
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'public'
+            ORDER BY tablename
+        `);
+        
+        const existingTables = result.map(row => row.tablename);
+        
+        if (existingTables.length === 0) {
+            logger.info('ℹ️  No tables found in database');
+            return;
+        }
+        
+        logger.info(`📋 Found ${existingTables.length} tables: ${existingTables.join(', ')}`);
+        
+        // Drop all tables with CASCADE to handle dependencies
+        logger.info('🗑️  Dropping all tables with CASCADE...');
+        for (const table of existingTables) {
+            try {
+                await db.run(`DROP TABLE IF EXISTS "${table}" CASCADE`);
+                logger.info(`✅ Dropped table: ${table}`);
+            } catch (error) {
+                logger.warn(`⚠️  Warning dropping table ${table}:`, error.message);
+            }
+        }
+        
+        // Drop all sequences that might remain
+        logger.info('🗑️  Dropping all sequences...');
+        const sequences = await db.all(`
+            SELECT sequencename
+            FROM pg_sequences
+            WHERE schemaname = 'public'
+        `);
+        
+        for (const seq of sequences) {
+            try {
+                await db.run(`DROP SEQUENCE IF EXISTS "${seq.sequencename}" CASCADE`);
+                logger.info(`✅ Dropped sequence: ${seq.sequencename}`);
+            } catch (error) {
+                logger.warn(`⚠️  Warning dropping sequence ${seq.sequencename}:`, error.message);
+            }
+        }
+        
+        // Drop all indexes that might remain
+        logger.info('🗑️  Dropping all indexes...');
+        const indexes = await db.all(`
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+            AND indexname NOT LIKE 'pg_%'
+        `);
+        
+        for (const idx of indexes) {
+            try {
+                await db.run(`DROP INDEX IF EXISTS "${idx.indexname}" CASCADE`);
+                logger.info(`✅ Dropped index: ${idx.indexname}`);
+            } catch (error) {
+                logger.warn(`⚠️  Warning dropping index ${idx.indexname}:`, error.message);
+            }
+        }
+        
+        // Verify all tables are dropped
+        const remainingTables = await db.all(`
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'public'
+        `);
+        
+        const remainingSequences = await db.all(`
+            SELECT sequencename
+            FROM pg_sequences
+            WHERE schemaname = 'public'
+        `);
+        
+        if (remainingTables.length === 0 && remainingSequences.length === 0) {
+            logger.info('✅ All tables, sequences, and indexes dropped successfully - Database is completely clean');
+        } else {
+            if (remainingTables.length > 0) {
+                logger.warn(`⚠️  ${remainingTables.length} tables still exist: ${remainingTables.map(t => t.tablename).join(', ')}`);
+            }
+            if (remainingSequences.length > 0) {
+                logger.warn(`⚠️  ${remainingSequences.length} sequences still exist: ${remainingSequences.map(s => s.sequencename).join(', ')}`);
+            }
+        }
+        
+    } catch (error) {
+        logger.error('❌ Error during table dropping:', error);
+        throw error;
+    }
+}
 
 async function main() {
     const command = process.argv[2];
@@ -47,15 +143,16 @@ Examples:
         process.exit(0);
     }
 
-    const dbManager = new DatabaseManager();
+    let db = null;
     
     try {
         logger.info('🔧 Starting database migration tool...');
-        logger.info(`📊 Database Type: ${process.env.DATABASE_TYPE || 'sqlite3'}`);
-        logger.info(`📁 Database Path: ${process.env.DB_PATH || process.env.SUPABASE_DB_URL || 'Not specified'}`);
+        logger.info(`📊 Database Type: PostgreSQL`);
+        logger.info(`📁 Database Connection: ${process.env.SUPABASE_DB_URL ? 'Supabase' : 'Local PostgreSQL'}`);
         
-        // Initialize database connection
-        await dbManager.initialize();
+        // Create database instance
+        db = DatabaseFactory.create();
+        await db.initialize();
         logger.info('✅ Database connection established');
 
         switch (command.toLowerCase()) {
@@ -71,19 +168,44 @@ Examples:
                 }
                 
                 logger.info('🗑️  Starting fresh migration...');
-                await dbManager.migrateFresh();
+                
+                // Drop all tables
+                await dropAllTables(db);
+                
+                // Create all tables
+                await db.createTables();
+                logger.info('✅ Tables created successfully');
+                
+                // Insert default data
+                await db.insertDefaultCategories();
+                logger.info('✅ Default categories inserted');
+                
+                await db.insertDefaultSubscriptionPlans();
+                logger.info('✅ Default subscription plans inserted');
+                
                 logger.info('✅ Fresh migration completed successfully');
                 break;
 
             case 'migrate':
                 logger.info('📈 Running database migrations...');
-                await dbManager.migrate();
+                
+                // Create tables (will skip if exists)
+                await db.createTables();
+                logger.info('✅ Database schema updated');
+                
                 logger.info('✅ Migrations completed successfully');
                 break;
 
             case 'seed':
                 logger.info('🌱 Seeding database with default data...');
-                await dbManager.seed();
+                
+                // Insert default data
+                await db.insertDefaultCategories();
+                logger.info('✅ Default categories seeded');
+                
+                await db.insertDefaultSubscriptionPlans();
+                logger.info('✅ Default subscription plans seeded');
+                
                 logger.info('✅ Database seeding completed successfully');
                 break;
 
@@ -104,10 +226,13 @@ Commands:
               Safe to run multiple times.
 
 Environment Variables:
-  DATABASE_TYPE     - Database type (sqlite3, postgres, supabase)
-  DB_PATH           - SQLite database file path
-  SUPABASE_DB_URL   - Supabase connection string
-  NODE_ENV          - Environment (development, production, staging)
+  SUPABASE_DB_URL       - Supabase connection string
+  POSTGRES_HOST         - PostgreSQL host
+  POSTGRES_PORT         - PostgreSQL port
+  POSTGRES_DB           - PostgreSQL database name
+  POSTGRES_USER         - PostgreSQL username
+  POSTGRES_PASSWORD     - PostgreSQL password
+  NODE_ENV              - Environment (development, production, staging)
 
 Examples:
   # Safe operations:
@@ -130,11 +255,13 @@ Examples:
         process.exit(1);
     } finally {
         // Close database connection
-        try {
-            await dbManager.close();
-            logger.info('🔌 Database connection closed');
-        } catch (closeError) {
-            logger.warn('⚠️  Warning closing database connection:', closeError.message);
+        if (db) {
+            try {
+                await db.close();
+                logger.info('🔌 Database connection closed');
+            } catch (closeError) {
+                logger.warn('⚠️  Warning closing database connection:', closeError.message);
+            }
         }
     }
 }

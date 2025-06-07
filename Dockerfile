@@ -18,7 +18,6 @@ FROM node:20-alpine
 
 # Install necessary packages
 RUN apk add --no-cache \
-    dcron \
     tzdata \
     bash \
     && rm -rf /var/cache/apk/*
@@ -36,17 +35,14 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY . .
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/data /app/logs /app/backups /app/exports && \
-    chmod 755 /app/data /app/logs /app/backups /app/exports
+RUN mkdir -p /app/data /app/logs /app/exports && \
+    chmod 755 /app/data /app/logs /app/exports
 
 # Don't create symlinks to avoid double logging
 # The application will log directly to stdout/stderr
 
-# Create cron job files (redirect to separate log files, not stdout)
-RUN echo "*/5 * * * * cd /app && /usr/local/bin/node scripts/cleanup-sessions.js cleanup >> /app/logs/cron-cleanup.log 2>&1" > /etc/cron.d/session-cleanup && \
-    echo "*/2 * * * * cd /app && /usr/local/bin/node scripts/anti-spam-monitor.js stats >> /app/logs/cron-antispam.log 2>&1" > /etc/cron.d/anti-spam && \
-    chmod 0644 /etc/cron.d/session-cleanup && \
-    chmod 0644 /etc/cron.d/anti-spam
+# Remove old cron jobs - application now handles cleanup internally
+# No external scripts needed for session cleanup or anti-spam monitoring
 
 # Copy and set up entrypoint script
 COPY docker/entrypoint.sh /app/entrypoint.sh

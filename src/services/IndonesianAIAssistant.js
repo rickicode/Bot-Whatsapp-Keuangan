@@ -67,8 +67,8 @@ class IndonesianAIAssistant {
         
         await message.reply(
             '📝 Langkah 1/3\n\n' +
-            'Siapa nama lengkap Anda?\n\n' +
-            '💡 Masukkan nama lengkap (minimal 2 kata)'
+            'Siapa nama Anda?\n\n' +
+            '💡 Masukkan nama Anda'
         );
         
         return true;
@@ -107,7 +107,7 @@ class IndonesianAIAssistant {
         if (!nameValidation.isValid) {
             await message.reply(
                 `❌ ${nameValidation.error}\n\n` +
-                'Coba masukkan nama lengkap Anda lagi:'
+                'Coba masukkan nama Anda lagi:'
             );
             return true;
         }
@@ -325,10 +325,6 @@ class IndonesianAIAssistant {
             return { isValid: false, error: 'Nama terlalu panjang (maksimal 100 karakter).' };
         }
         
-        const words = trimmedName.split(/\s+/);
-        if (words.length < 2) {
-            return { isValid: false, error: 'Masukkan nama lengkap (minimal 2 kata).' };
-        }
         
         // Check for special characters (allow letters, spaces, apostrophes, hyphens)
         const nameRegex = /^[a-zA-Z\s'-]+$/;

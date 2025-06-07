@@ -1,7 +1,6 @@
 const Logger = require('../utils/Logger');
 const TransactionService = require('../services/TransactionService');
 const ReportService = require('../services/ReportService');
-const DebtService = require('../services/DebtService');
 const CategoryService = require('../services/CategoryService');
 const moment = require('moment');
 
@@ -15,7 +14,6 @@ class CommandHandler {
         // Initialize services
         this.transactionService = new TransactionService(database, aiService);
         this.reportService = new ReportService(database, aiService);
-        this.debtService = new DebtService(database);
         this.categoryService = new CategoryService(database);
         
         // Command mappings
@@ -28,15 +26,7 @@ class CommandHandler {
             '/keluar': this.handleExpense.bind(this),
             '/expense': this.handleExpense.bind(this),
             
-            // Debt/receivable commands
-            '/hutang': this.handleDebt.bind(this),
-            '/debt': this.handleDebt.bind(this),
-            '/bayar-hutang': this.handlePayDebt.bind(this),
-            '/pay-debt': this.handlePayDebt.bind(this),
             
-            // Bill commands
-            '/tagihan': this.handleBill.bind(this),
-            '/bill': this.handleBill.bind(this),
             
             // Balance and reporting
             '/saldo': this.handleBalance.bind(this),
@@ -50,9 +40,6 @@ class CommandHandler {
             '/kategori-baru': this.handleNewCategory.bind(this),
             '/new-category': this.handleNewCategory.bind(this),
             
-            // Debt management
-            '/hutang-list': this.handleListDebts.bind(this),
-            '/debt-list': this.handleListDebts.bind(this),
             
             // AI features
             '/analisis': this.handleAnalysis.bind(this),
@@ -2147,22 +2134,6 @@ Permen 2k
         return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
     }
 
-    // Placeholder methods for other commands
-    async handleDebt(message, userPhone, args) {
-        await message.reply('🚧 Fitur manajemen hutang akan segera hadir!');
-    }
-
-    async handlePayDebt(message, userPhone, args) {
-        await message.reply('🚧 Fitur pembayaran hutang akan segera hadir!');
-    }
-
-    async handleBill(message, userPhone, args) {
-        await message.reply('🚧 Fitur manajemen tagihan akan segera hadir!');
-    }
-
-    async handleListDebts(message, userPhone, args) {
-        await message.reply('🚧 Fitur daftar hutang akan segera hadir!');
-    }
 
     async handleAdvice(message, userPhone, args) {
         if (!this.ai.isAvailable()) {
