@@ -1,20 +1,14 @@
-const SQLiteDatabase = require('./SQLiteDatabase');
 const PostgresDatabase = require('./PostgresDatabase');
 const Logger = require('../utils/Logger');
 
 class DatabaseFactory {
     static create() {
         const logger = new Logger();
-        const dbType = process.env.DATABASE_TYPE || 'sqlite3';
+        const dbType = process.env.DATABASE_TYPE || 'postgres';
 
         logger.info(`Initializing database type: ${dbType}`);
 
         switch (dbType.toLowerCase()) {
-            case 'sqlite3':
-            case 'sqlite':
-                const dbPath = process.env.DB_PATH || './data/financial.db';
-                return new SQLiteDatabase(dbPath);
-
             case 'postgres':
             case 'postgresql':
             case 'supabase':
@@ -65,23 +59,18 @@ class DatabaseFactory {
                 return new PostgresDatabase(config);
 
             default:
-                throw new Error(`Jenis database tidak didukung: ${dbType}. Jenis yang didukung: sqlite3, postgres`);
+                throw new Error(`Jenis database tidak didukung: ${dbType}. Jenis yang didukung: postgres, postgresql, supabase`);
         }
     }
 
     static getSupportedTypes() {
-        return ['sqlite3', 'postgres'];
+        return ['postgres', 'postgresql', 'supabase'];
     }
 
     static getDefaultConfig(type) {
         switch (type.toLowerCase()) {
-            case 'sqlite3':
-                return {
-                    DATABASE_TYPE: 'sqlite3',
-                    DB_PATH: './data/financial.db'
-                };
-
             case 'postgres':
+            case 'postgresql':
                 return {
                     DATABASE_TYPE: 'postgres',
                     DATABASE_HOST: 'localhost',
@@ -90,6 +79,12 @@ class DatabaseFactory {
                     DATABASE_USER: 'your_username',
                     DATABASE_PASSWORD: 'your_password',
                     DATABASE_SSL: 'false'
+                };
+
+            case 'supabase':
+                return {
+                    DATABASE_TYPE: 'supabase',
+                    SUPABASE_DB_URL: 'postgresql://username:password@host:5432/database'
                 };
 
             default:

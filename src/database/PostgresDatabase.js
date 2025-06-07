@@ -1,4 +1,4 @@
-const { Pool } = require('pg');
+const postgres = require('postgres');
 const BaseDatabase = require('./BaseDatabase');
 const Logger = require('../utils/Logger');
 
@@ -6,8 +6,7 @@ class PostgresDatabase extends BaseDatabase {
     constructor(config) {
         super();
         this.config = config;
-        this.pool = null;
-        this.client = null;
+        this.sql = null;
         this.logger = new Logger();
         this.poolMetrics = {
             connectionsCreated: 0,
@@ -21,14 +20,15 @@ class PostgresDatabase extends BaseDatabase {
 
     async initialize() {
         try {
-            // Create connection pool
-            // Configure connection pool with proper SSL settings
-            const poolConfig = {
+            // Configure postgres connection with pool settings
+            const connectionConfig = {
                 host: this.config.host,
                 port: this.config.port,
                 database: this.config.database,
-                user: this.config.user,
+                username: this.config.user,
                 password: this.config.password,
+                
+                // SSL Configuration
                 ssl: this.config.ssl ? {
                     rejectUnauthorized: false // Required for Supabase
                 } : false,
@@ -42,19 +42,14 @@ class PostgresDatabase extends BaseDatabase {
                 min: parseInt(process.env.DB_POOL_MIN) || 5,  // Minimum number of clients to keep in pool
                 
                 // Connection Timeouts (Fine-tuned for optimal performance)
-                idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000, // 30 seconds
-                connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 5000, // 5 seconds
-                acquireTimeoutMillis: parseInt(process.env.DB_ACQUIRE_TIMEOUT) || 10000, // 10 seconds
-                createTimeoutMillis: parseInt(process.env.DB_CREATE_TIMEOUT) || 5000, // 5 seconds
-                destroyTimeoutMillis: parseInt(process.env.DB_DESTROY_TIMEOUT) || 5000, // 5 seconds
+                idle_timeout: parseInt(process.env.DB_IDLE_TIMEOUT) || 30, // 30 seconds
+                connect_timeout: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 5, // 5 seconds
                 
                 // Pool Management (Optimized for transaction throughput)
-                reapIntervalMillis: parseInt(process.env.DB_REAP_INTERVAL) || 1000, // 1 second
-                createRetryIntervalMillis: parseInt(process.env.DB_CREATE_RETRY_INTERVAL) || 200, // 200ms
+                max_lifetime: parseInt(process.env.DB_MAX_LIFETIME) || 3600, // 1 hour
                 
                 // Connection Stability & Performance
-                keepAlive: true,
-                keepAliveInitialDelayMillis: 10000,
+                keep_alive: true,
                 
                 // Query Performance Optimization
                 statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT) || 30000, // 30 seconds
@@ -63,139 +58,106 @@ class PostgresDatabase extends BaseDatabase {
                 // Application identification for monitoring
                 application_name: process.env.APP_NAME || 'whatsapp-financial-bot',
                 
-                // ==========================================
-                // ADDITIONAL POSTGRESQL OPTIMIZATIONS
-                // ==========================================
-                
-                // Connection-level optimizations
-                options: '--application_name=' + (process.env.APP_NAME || 'whatsapp-financial-bot'),
-                
                 // Performance parameters for PostgreSQL
-                parseInputDatesAsUTC: true,
+                prepare: false, // Disable prepared statements for better compatibility
                 
                 // Connection pooling specific optimizations
-                allowExitOnIdle: false, // Keep pool alive
+                transform: {
+                    undefined: null
+                },
                 
-                // Advanced timeout settings
-                idleInTransactionSessionTimeout: parseInt(process.env.DB_IDLE_IN_TRANSACTION_TIMEOUT) || 60000, // 60 seconds
+                // Enhanced timeout settings
+                idle_in_transaction_session_timeout: parseInt(process.env.DB_IDLE_IN_TRANSACTION_TIMEOUT) || 60000, // 60 seconds
                 
-                // Connection validation
-                validateConnection: true,
+                // Suppress PostgreSQL NOTICE messages (like "table already exists")
+                // Enable with DEBUG_NOTICES=true if needed for troubleshooting
+                onnotice: process.env.DEBUG_NOTICES === 'true' ?
+                    (notice) => this.logger.info('PostgreSQL Notice:', notice.message) :
+                    () => {}, // Suppress notice messages by default
                 
-                // Pool event handling
-                Promise: Promise, // Use native Promise for better performance
+                // Additional config for Supabase
+                ...(this.config.extra || {})
             };
 
-            // Add extra config if provided (for Supabase)
-            if (this.config.extra) {
-                Object.assign(poolConfig, this.config.extra);
-            }
+            // Create postgres connection
+            this.sql = postgres(connectionConfig);
 
-            this.pool = new Pool(poolConfig);
-
-            // Set up enhanced pool event handlers for monitoring
-            this.setupPoolEventHandlers();
+            // Set up enhanced connection monitoring
+            this.setupConnectionMonitoring();
 
             // Test connection with enhanced validation
-            await this.validatePoolConnection();
+            await this.validateConnection();
             
             // Create tables
             await this.createTables();
             
-            // Log pool configuration for debugging
-            this.logger.info('PostgreSQL Transaction Pool initialized with enhanced config:', {
-                max: poolConfig.max,
-                min: poolConfig.min,
-                idleTimeout: poolConfig.idleTimeoutMillis,
-                connectionTimeout: poolConfig.connectionTimeoutMillis,
-                acquireTimeout: poolConfig.acquireTimeoutMillis,
-                keepAlive: poolConfig.keepAlive,
-                statementTimeout: poolConfig.statement_timeout,
-                queryTimeout: poolConfig.query_timeout
+            // Log configuration for debugging
+            this.logger.info('PostgreSQL Connection Pool initialized with enhanced config:', {
+                max: connectionConfig.max,
+                min: connectionConfig.min,
+                idle_timeout: connectionConfig.idle_timeout,
+                connect_timeout: connectionConfig.connect_timeout,
+                keep_alive: connectionConfig.keep_alive,
+                statement_timeout: connectionConfig.statement_timeout,
+                query_timeout: connectionConfig.query_timeout
             });
-            this.logger.info('PostgreSQL database initialized successfully with Transaction Pooler');
+            this.logger.info('PostgreSQL database initialized successfully with postgres module');
         } catch (error) {
             this.logger.error('Error initializing PostgreSQL database:', error);
             throw error;
         }
     }
 
-    async validatePoolConnection() {
-        const testClient = await this.pool.connect();
+    async validateConnection() {
         try {
             // Enhanced connection validation
             const start = Date.now();
-            await testClient.query('SELECT NOW(), version()');
+            const result = await this.sql`SELECT NOW() as server_time, version() as server_version`;
             const duration = Date.now() - start;
             
-            this.logger.info(`Pool connection validated successfully (${duration}ms)`);
+            this.logger.info(`Connection validated successfully (${duration}ms)`);
             this.poolMetrics.lastHealthCheck = new Date();
-        } finally {
-            testClient.release();
+            
+            return result[0];
+        } catch (error) {
+            this.logger.error('Connection validation failed:', error);
+            throw error;
         }
     }
 
-    setupPoolEventHandlers() {
-        // Enhanced monitoring for transaction pooler optimization
-        this.pool.on('connect', (client) => {
-            this.poolMetrics.connectionsCreated++;
-            if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
-                this.logger.info(`New client connected to pool. Total created: ${this.poolMetrics.connectionsCreated}`);
-            }
-        });
-
-        this.pool.on('acquire', (client) => {
-            if (process.env.DEBUG_POOL === 'true') {
-                this.logger.info(`Client acquired from pool. Pool stats: ${JSON.stringify(this.getPoolStatsSync())}`);
-            }
-        });
-
-        this.pool.on('remove', (client) => {
-            this.poolMetrics.connectionsDestroyed++;
-            if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
-                this.logger.info(`Client removed from pool. Total destroyed: ${this.poolMetrics.connectionsDestroyed}`);
-            }
-        });
-
-        this.pool.on('error', (err, client) => {
-            this.poolMetrics.errorsCount++;
-            this.logger.error('Unexpected error on idle client:', err);
-            this.logger.error('Pool error metrics:', {
-                totalErrors: this.poolMetrics.errorsCount,
-                poolStats: this.getPoolStatsSync()
-            });
-        });
-
-        // Enhanced pool monitoring
-        this.pool.on('drain', () => {
-            if (process.env.DEBUG_POOL === 'true') {
-                this.logger.warn('Pool has been drained - all clients checked out');
-            }
-        });
+    setupConnectionMonitoring() {
+        // Enhanced monitoring for connection tracking
+        this.poolMetrics.connectionsCreated++;
+        
+        if (process.env.NODE_ENV === 'development' || process.env.DEBUG_POOL === 'true') {
+            this.logger.info(`New connection established. Total created: ${this.poolMetrics.connectionsCreated}`);
+        }
     }
 
     getPoolStatsSync() {
-        if (!this.pool) return null;
+        if (!this.sql) return null;
         
         return {
-            totalCount: this.pool.totalCount,
-            idleCount: this.pool.idleCount,
-            waitingCount: this.pool.waitingCount,
-            max: this.pool.options.max,
-            min: this.pool.options.min
+            connectionString: this.sql.options.host + ':' + this.sql.options.port,
+            database: this.sql.options.database,
+            username: this.sql.options.username,
+            max: this.sql.options.max,
+            min: this.sql.options.min,
+            ssl: !!this.sql.options.ssl
         };
     }
 
     async getPoolStats() {
-        if (!this.pool) return null;
+        if (!this.sql) return null;
         
         return {
-            // Basic pool statistics
-            totalCount: this.pool.totalCount,
-            idleCount: this.pool.idleCount,
-            waitingCount: this.pool.waitingCount,
-            max: this.pool.options.max,
-            min: this.pool.options.min,
+            // Basic connection statistics
+            connectionString: this.sql.options.host + ':' + this.sql.options.port,
+            database: this.sql.options.database,
+            username: this.sql.options.username,
+            max: this.sql.options.max,
+            min: this.sql.options.min,
+            ssl: !!this.sql.options.ssl,
             
             // Enhanced metrics for transaction pooler monitoring
             connectionsCreated: this.poolMetrics.connectionsCreated,
@@ -204,10 +166,6 @@ class PostgresDatabase extends BaseDatabase {
             errorsCount: this.poolMetrics.errorsCount,
             avgQueryTime: this.poolMetrics.avgQueryTime,
             lastHealthCheck: this.poolMetrics.lastHealthCheck,
-            
-            // Pool efficiency metrics
-            poolEfficiency: this.pool.totalCount > 0 ? (this.pool.idleCount / this.pool.totalCount * 100).toFixed(2) + '%' : '0%',
-            poolUtilization: this.pool.totalCount > 0 ? ((this.pool.totalCount - this.pool.idleCount) / this.pool.totalCount * 100).toFixed(2) + '%' : '0%',
             
             // Connection health
             connectionHealth: this.poolMetrics.errorsCount < 5 ? 'healthy' : 'degraded',
@@ -219,16 +177,14 @@ class PostgresDatabase extends BaseDatabase {
 
     async healthCheck() {
         try {
-            const client = await this.pool.connect();
             const start = Date.now();
             
             // Enhanced health check with multiple validations
-            await client.query('SELECT 1 as health_check');
-            await client.query('SELECT NOW() as server_time');
-            await client.query('SELECT version() as server_version');
+            await this.sql`SELECT 1 as health_check`;
+            await this.sql`SELECT NOW() as server_time`;
+            await this.sql`SELECT version() as server_version`;
             
             const duration = Date.now() - start;
-            client.release();
             
             // Update metrics
             this.poolMetrics.lastHealthCheck = new Date();
@@ -238,18 +194,15 @@ class PostgresDatabase extends BaseDatabase {
             return {
                 status: 'healthy',
                 responseTime: duration,
-                poolStats: stats,
+                connectionStats: stats,
                 connectionHealth: stats.connectionHealth,
-                poolEfficiency: stats.poolEfficiency,
-                poolUtilization: stats.poolUtilization,
                 timestamp: new Date().toISOString(),
                 
                 // Transaction pooler specific health indicators
                 transactionPoolerStatus: {
-                    optimalPoolSize: stats.totalCount >= stats.min && stats.totalCount <= stats.max,
                     connectionReuse: stats.connectionsCreated > 0 && stats.queriesExecuted > stats.connectionsCreated,
                     errorRate: stats.queriesExecuted > 0 ? (stats.errorsCount / stats.queriesExecuted * 100).toFixed(2) + '%' : '0%',
-                    poolStability: stats.connectionsDestroyed < stats.connectionsCreated * 0.5 // Less than 50% churn
+                    connectionStability: stats.connectionsDestroyed < stats.connectionsCreated * 0.5 // Less than 50% churn
                 }
             };
         } catch (error) {
@@ -258,7 +211,7 @@ class PostgresDatabase extends BaseDatabase {
             return {
                 status: 'unhealthy',
                 error: error.message,
-                poolStats: await this.getPoolStats(),
+                connectionStats: await this.getPoolStats(),
                 timestamp: new Date().toISOString(),
                 transactionPoolerStatus: {
                     error: 'Health check failed'
@@ -268,25 +221,21 @@ class PostgresDatabase extends BaseDatabase {
     }
 
     async close() {
-        if (this.pool) {
+        if (this.sql) {
             const stats = await this.getPoolStats();
-            this.logger.info('Closing PostgreSQL Transaction Pool. Final stats:', stats);
+            this.logger.info('Closing PostgreSQL Connection Pool. Final stats:', stats);
             
-            // Graceful pool shutdown
-            await this.pool.end();
-            this.logger.info('PostgreSQL Transaction Pool closed successfully');
+            // Graceful connection shutdown
+            await this.sql.end();
+            this.logger.info('PostgreSQL Connection Pool closed successfully');
         }
     }
 
     async run(sql, params = []) {
         return this.executeWithRetry(async () => {
-            let client;
             const queryStart = Date.now();
             
             try {
-                // Get client from pool with timeout
-                client = await this.pool.connect();
-                
                 // Convert SQLite style queries to PostgreSQL
                 let pgSql = sql;
                 
@@ -296,7 +245,7 @@ class PostgresDatabase extends BaseDatabase {
                     if (sql.toLowerCase().includes('into users')) {
                         pgSql += ' ON CONFLICT (phone) DO NOTHING';
                     } else if (sql.toLowerCase().includes('into categories')) {
-                        pgSql += ' ON CONFLICT (user_phone, name, type) DO NOTHING';
+                        pgSql += ' ON CONFLICT (name, type) DO NOTHING';
                     }
                 }
                 
@@ -308,17 +257,13 @@ class PostgresDatabase extends BaseDatabase {
                     }
                 }
                 
-                // Convert SQLite style ? placeholders to PostgreSQL $1, $2, etc.
-                if (!pgSql.includes('$')) {
-                    pgSql = this.convertPlaceholders(pgSql);
-                }
-                
                 // Only log SQL in debug mode
                 if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
                     this.logger.info(`Executing SQL: ${pgSql}`, params);
                 }
                 
-                const result = await client.query(pgSql, params);
+                // Execute query using postgres template literal
+                const result = await this.sql.unsafe(pgSql, params);
                 
                 // Update metrics
                 const queryDuration = Date.now() - queryStart;
@@ -326,12 +271,12 @@ class PostgresDatabase extends BaseDatabase {
                 this.poolMetrics.avgQueryTime = (this.poolMetrics.avgQueryTime + queryDuration) / 2;
                 
                 // Return SQLite-compatible result with proper lastID
-                const lastID = result.rows.length > 0 && result.rows[0].id ? result.rows[0].id :
-                              (result.rowCount > 0 ? result.rowCount : null);
+                const lastID = result.length > 0 && result[0].id ? result[0].id :
+                              (result.count > 0 ? result.count : null);
                 
                 return {
                     lastID: lastID,
-                    changes: result.rowCount
+                    changes: result.count || result.length || 0
                 };
             } catch (error) {
                 this.poolMetrics.errorsCount++;
@@ -339,10 +284,6 @@ class PostgresDatabase extends BaseDatabase {
                 this.logger.error('SQL:', sql);
                 this.logger.error('Params:', params);
                 throw error;
-            } finally {
-                if (client) {
-                    client.release();
-                }
             }
         });
     }
@@ -404,99 +345,73 @@ class PostgresDatabase extends BaseDatabase {
 
     async get(sql, params = []) {
         return this.executeWithRetry(async () => {
-            let client;
             const queryStart = Date.now();
             
             try {
-                client = await this.pool.connect();
-                let pgSql = sql;
-                if (!pgSql.includes('$')) {
-                    pgSql = this.convertPlaceholders(sql);
-                }
-                const result = await client.query(pgSql, params);
+                const result = await this.sql.unsafe(sql, params);
                 
                 // Update metrics
                 const queryDuration = Date.now() - queryStart;
                 this.poolMetrics.queriesExecuted++;
                 this.poolMetrics.avgQueryTime = (this.poolMetrics.avgQueryTime + queryDuration) / 2;
                 
-                return result.rows[0] || null;
+                return result[0] || null;
             } catch (error) {
                 this.poolMetrics.errorsCount++;
                 this.logger.error('PostgreSQL get error:', error);
                 this.logger.error('SQL:', sql);
                 this.logger.error('Params:', params);
                 throw error;
-            } finally {
-                if (client) {
-                    client.release();
-                }
             }
         });
     }
 
     async all(sql, params = []) {
         return this.executeWithRetry(async () => {
-            let client;
             const queryStart = Date.now();
             
             try {
-                client = await this.pool.connect();
-                let pgSql = sql;
-                if (!pgSql.includes('$')) {
-                    pgSql = this.convertPlaceholders(sql);
-                }
-                const result = await client.query(pgSql, params);
+                const result = await this.sql.unsafe(sql, params);
                 
                 // Update metrics
                 const queryDuration = Date.now() - queryStart;
                 this.poolMetrics.queriesExecuted++;
                 this.poolMetrics.avgQueryTime = (this.poolMetrics.avgQueryTime + queryDuration) / 2;
                 
-                return result.rows;
+                return result;
             } catch (error) {
                 this.poolMetrics.errorsCount++;
                 this.logger.error('PostgreSQL all error:', error);
                 this.logger.error('SQL:', sql);
                 this.logger.error('Params:', params);
                 throw error;
-            } finally {
-                if (client) {
-                    client.release();
-                }
             }
         });
     }
 
     async beginTransaction() {
-        if (!this.client) {
-            this.client = await this.pool.connect();
-        }
-        return this.client.query('BEGIN');
+        return await this.sql.begin(async sql => {
+            this.transactionSql = sql;
+            return sql;
+        });
     }
 
     async commit() {
-        if (this.client) {
-            const result = await this.client.query('COMMIT');
-            this.client.release();
-            this.client = null;
-            return result;
+        // Transaction is automatically committed when the function returns successfully
+        // in postgres module's begin() method
+        if (this.transactionSql) {
+            this.transactionSql = null;
         }
+        return Promise.resolve();
     }
 
     async rollback() {
-        if (this.client) {
-            const result = await this.client.query('ROLLBACK');
-            this.client.release();
-            this.client = null;
-            return result;
+        // Transaction is automatically rolled back when an error is thrown
+        // in postgres module's begin() method
+        if (this.transactionSql) {
+            this.transactionSql = null;
         }
-    }
-
-    // Convert SQLite ? placeholders to PostgreSQL $1, $2, etc.
-    convertPlaceholders(sql) {
-        let index = 1;
-        return sql.replace(/\?/g, () => `$${index++}`);
+        return Promise.resolve();
     }
 
     // Convert SQLite syntax to PostgreSQL syntax
@@ -688,12 +603,9 @@ class PostgresDatabase extends BaseDatabase {
             )`
         ];
 
-        let client;
         try {
-            client = await this.pool.connect();
-            
             for (const table of tables) {
-                await client.query(table);
+                await this.sql.unsafe(table);
             }
 
             // Create indexes for performance - optimized for transaction pooler
@@ -717,7 +629,7 @@ class PostgresDatabase extends BaseDatabase {
 
             for (const index of indexes) {
                 try {
-                    await client.query(index);
+                    await this.sql.unsafe(index);
                 } catch (error) {
                     // Ignore if index already exists
                     if (!error.message.includes('already exists')) {
@@ -727,28 +639,24 @@ class PostgresDatabase extends BaseDatabase {
             }
 
             // Create triggers
-            await this.createTriggers(client);
+            await this.createTriggers();
 
             // Add missing columns for existing tables
-            await this.addMissingColumns(client);
+            await this.addMissingColumns();
 
             // Insert default data
-            await this.insertDefaultCategories(client);
-            await this.insertDefaultSubscriptionPlans(client);
+            await this.insertDefaultCategories();
+            await this.insertDefaultSubscriptionPlans();
             
         } catch (error) {
             this.logger.error('Error creating tables:', error);
             throw error;
-        } finally {
-            if (client) {
-                client.release();
-            }
         }
     }
 
-    async createTriggers(client) {
+    async createTriggers() {
         // Create update trigger function
-        await client.query(`
+        await this.sql`
             CREATE OR REPLACE FUNCTION update_updated_at_column()
             RETURNS TRIGGER AS $$
             BEGIN
@@ -756,7 +664,7 @@ class PostgresDatabase extends BaseDatabase {
                 RETURN NEW;
             END;
             $$ language 'plpgsql'
-        `);
+        `;
 
         // Apply triggers (PostgreSQL doesn't support IF NOT EXISTS for triggers)
         const triggers = [
@@ -790,13 +698,13 @@ class PostgresDatabase extends BaseDatabase {
         for (const trigger of triggers) {
             try {
                 // Check if trigger exists
-                const exists = await client.query(`
+                const exists = await this.sql`
                     SELECT 1 FROM information_schema.triggers
-                    WHERE trigger_name = $1 AND event_object_table = $2
-                `, [trigger.name, trigger.table]);
+                    WHERE trigger_name = ${trigger.name} AND event_object_table = ${trigger.table}
+                `;
 
-                if (exists.rows.length === 0) {
-                    await client.query(trigger.sql);
+                if (exists.length === 0) {
+                    await this.sql.unsafe(trigger.sql);
                     this.logger.info(`Created trigger: ${trigger.name}`);
                 } else {
                     this.logger.info(`Trigger already exists: ${trigger.name}`);
@@ -807,28 +715,28 @@ class PostgresDatabase extends BaseDatabase {
         }
     }
 
-    async addMissingColumns(client) {
+    async addMissingColumns() {
         try {
             // Add last_reset_date column to user_subscriptions if it doesn't exist
-            await client.query(`
+            await this.sql`
                 ALTER TABLE user_subscriptions
                 ADD COLUMN IF NOT EXISTS last_reset_date DATE DEFAULT CURRENT_DATE
-            `);
+            `;
             this.logger.info('Added last_reset_date column to user_subscriptions (if not exists)');
 
             // Add icon column to categories if it doesn't exist
-            await client.query(`
+            await this.sql`
                 ALTER TABLE categories
                 ADD COLUMN IF NOT EXISTS icon VARCHAR(10) DEFAULT '📝'
-            `);
+            `;
             this.logger.info('Added icon column to categories (if not exists)');
 
             // Update existing user_subscriptions with current date if last_reset_date is null
-            await client.query(`
+            await this.sql`
                 UPDATE user_subscriptions
                 SET last_reset_date = CURRENT_DATE
                 WHERE last_reset_date IS NULL
-            `);
+            `;
             this.logger.info('Updated existing user_subscriptions with current date');
 
         } catch (error) {
@@ -837,10 +745,7 @@ class PostgresDatabase extends BaseDatabase {
         }
     }
 
-    async insertDefaultCategories(client = null) {
-        const dbClient = client || await this.pool.connect();
-        const shouldRelease = !client;
-        
+    async insertDefaultCategories() {
         try {
             const defaultCategories = [
                 // Income categories (Pemasukan)
@@ -922,11 +827,8 @@ class PostgresDatabase extends BaseDatabase {
             const minCategoriesRequired = defaultCategories.length;
 
             // Check existing categories count (global/fixed categories only)
-            const existingCount = await dbClient.query(
-                'SELECT COUNT(*) as count FROM categories'
-            );
-            
-            const currentCount = existingCount.rows[0] ? parseInt(existingCount.rows[0].count) : 0;
+            const existingCount = await this.sql`SELECT COUNT(*) as count FROM categories`;
+            const currentCount = existingCount[0] ? parseInt(existingCount[0].count) : 0;
             
             this.logger.info(`Current fixed categories: ${currentCount}, Required: ${minCategoriesRequired}`);
             
@@ -935,26 +837,23 @@ class PostgresDatabase extends BaseDatabase {
                 this.logger.info('Categories insufficient, recreating fixed categories for PostgreSQL...');
                 
                 // Delete existing categories
-                await dbClient.query('DELETE FROM categories');
+                await this.sql`DELETE FROM categories`;
                 
                 // Insert all default categories as fixed global categories
                 for (const category of defaultCategories) {
                     try {
-                        await dbClient.query(
-                            'INSERT INTO categories (name, type, color) VALUES ($1, $2, $3)',
-                            [category.name, category.type, category.color]
-                        );
+                        await this.sql`
+                            INSERT INTO categories (name, type, color) 
+                            VALUES (${category.name}, ${category.type}, ${category.color})
+                        `;
                     } catch (error) {
                         this.logger.error(`Error inserting fixed category ${category.name}:`, error);
                     }
                 }
                 
                 // Verify insertion
-                const finalCount = await dbClient.query(
-                    'SELECT COUNT(*) as count FROM categories'
-                );
-                
-                this.logger.info(`Fixed categories created successfully. Total: ${finalCount.rows[0].count}`);
+                const finalCount = await this.sql`SELECT COUNT(*) as count FROM categories`;
+                this.logger.info(`Fixed categories created successfully. Total: ${finalCount[0].count}`);
             } else {
                 this.logger.info('Fixed categories already sufficient, skipping recreation');
             }
@@ -973,36 +872,25 @@ class PostgresDatabase extends BaseDatabase {
             
             for (const category of defaultCategories) {
                 try {
-                    await dbClient.query(
-                        `INSERT INTO categories (name, type, color)
-                         VALUES ($1, $2, $3)
-                         ON CONFLICT (name, type) DO NOTHING`,
-                        [category.name, category.type, category.color]
-                    );
+                    await this.sql`
+                        INSERT INTO categories (name, type, color)
+                        VALUES (${category.name}, ${category.type}, ${category.color})
+                        ON CONFLICT (name, type) DO NOTHING
+                    `;
                 } catch (fallbackError) {
                     this.logger.error(`Fallback error for category ${category.name}:`, fallbackError);
                 }
-            }
-        } finally {
-            if (shouldRelease && dbClient) {
-                dbClient.release();
             }
         }
         
         this.logger.info('Default categories setup completed for PostgreSQL');
     }
 
-    async insertDefaultSubscriptionPlans(client = null) {
-        const dbClient = client || await this.pool.connect();
-        const shouldRelease = !client;
-        
+    async insertDefaultSubscriptionPlans() {
         try {
             // Check existing subscription plans count
-            const existingCount = await dbClient.query(
-                'SELECT COUNT(*) as count FROM subscription_plans'
-            );
-            
-            const currentCount = existingCount.rows[0] ? parseInt(existingCount.rows[0].count) : 0;
+            const existingCount = await this.sql`SELECT COUNT(*) as count FROM subscription_plans`;
+            const currentCount = existingCount[0] ? parseInt(existingCount[0].count) : 0;
             
             this.logger.info(`Current subscription plans: ${currentCount}`);
             
@@ -1030,33 +918,25 @@ class PostgresDatabase extends BaseDatabase {
                 
                 for (const plan of defaultPlans) {
                     try {
-                        await dbClient.query(
-                            `INSERT INTO subscription_plans (name, display_name, description, monthly_transaction_limit, price_monthly, features)
-                             VALUES ($1, $2, $3, $4, $5, $6)
-                             ON CONFLICT (name) DO NOTHING`,
-                            [plan.name, plan.display_name, plan.description, plan.monthly_transaction_limit, plan.price_monthly, plan.features]
-                        );
+                        await this.sql`
+                            INSERT INTO subscription_plans (name, display_name, description, monthly_transaction_limit, price_monthly, features)
+                            VALUES (${plan.name}, ${plan.display_name}, ${plan.description}, ${plan.monthly_transaction_limit}, ${plan.price_monthly}, ${plan.features})
+                            ON CONFLICT (name) DO NOTHING
+                        `;
                     } catch (error) {
                         this.logger.error(`Error inserting subscription plan ${plan.name}:`, error);
                     }
                 }
                 
                 // Verify insertion
-                const finalCount = await dbClient.query(
-                    'SELECT COUNT(*) as count FROM subscription_plans'
-                );
-                
-                this.logger.info(`Subscription plans created successfully. Total: ${finalCount.rows[0].count}`);
+                const finalCount = await this.sql`SELECT COUNT(*) as count FROM subscription_plans`;
+                this.logger.info(`Subscription plans created successfully. Total: ${finalCount[0].count}`);
             } else {
                 this.logger.info('Subscription plans already exist, skipping creation');
             }
             
         } catch (error) {
             this.logger.error('Error in insertDefaultSubscriptionPlans for PostgreSQL:', error);
-        } finally {
-            if (shouldRelease && dbClient) {
-                dbClient.release();
-            }
         }
         
         this.logger.info('Default subscription plans setup completed for PostgreSQL');
@@ -1078,10 +958,7 @@ class PostgresDatabase extends BaseDatabase {
     }
 
     async dropAllTables() {
-        let client;
         try {
-            client = await this.pool.connect();
-            
             this.logger.info('Dropping all PostgreSQL tables...');
             
             // Drop tables in order to handle foreign key constraints
@@ -1102,7 +979,7 @@ class PostgresDatabase extends BaseDatabase {
 
             for (const table of tables) {
                 try {
-                    await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+                    await this.sql.unsafe(`DROP TABLE IF EXISTS ${table} CASCADE`);
                     this.logger.info(`Dropped table: ${table}`);
                 } catch (error) {
                     this.logger.warn(`Warning dropping table ${table}:`, error.message);
@@ -1111,7 +988,7 @@ class PostgresDatabase extends BaseDatabase {
 
             // Drop any remaining triggers and functions
             try {
-                await client.query('DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE');
+                await this.sql`DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE`;
                 this.logger.info('Dropped update trigger function');
             } catch (error) {
                 this.logger.warn('Warning dropping trigger function:', error.message);
@@ -1121,10 +998,6 @@ class PostgresDatabase extends BaseDatabase {
         } catch (error) {
             this.logger.error('Error dropping PostgreSQL tables:', error);
             throw error;
-        } finally {
-            if (client) {
-                client.release();
-            }
         }
     }
 
