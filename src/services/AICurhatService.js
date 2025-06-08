@@ -206,8 +206,26 @@ Semoga harimu menyenangkan! ✨`;
                 };
             }
 
-            // Check if user requests voice response
-            const isVoiceRequested = this.ttsService.isVoiceRequested(message);
+            // Check for voice mode commands
+            const voiceModeCommand = this.checkVoiceModeCommand(message);
+            if (voiceModeCommand) {
+                await this.setUserVoicePreference(userPhone, voiceModeCommand);
+                const response = this.getVoiceModeResponse(voiceModeCommand);
+                
+                // Save command and response to history
+                const sessionId = this.generateSessionId(userPhone);
+                await this.sessionManager.saveCurhatMessage(userPhone, sessionId, 'user', message);
+                await this.sessionManager.saveCurhatMessage(userPhone, sessionId, 'assistant', response);
+                
+                return {
+                    type: 'text',
+                    content: response
+                };
+            }
+
+            // Check if user requests voice response (current message or saved preference)
+            const userVoicePreference = await this.getUserVoicePreference(userPhone);
+            const isVoiceRequested = this.ttsService.isVoiceRequested(message) || userVoicePreference === 'always';
 
             // Generate session ID for this conversation
             const sessionId = this.generateSessionId(userPhone);
@@ -438,6 +456,140 @@ Semoga harimu menyenangkan! ✨`;
             hasApiKey: !!this.apiConfig.apiKey,
             tts: this.ttsService.getStatus()
         };
+    }
+
+    /**
+     * Check if message contains voice mode commands
+     * @param {string} message - User message
+     * @returns {string|null} - Voice mode command ('always', 'never', 'ask') or null
+     */
+    checkVoiceModeCommand(message) {
+        const lowerMessage = message.toLowerCase().trim();
+        
+        // Commands for always voice mode
+        if (lowerMessage.match(/(selalu|always).*(suara|voice|audio)/i) ||
+            lowerMessage.match(/(suara|voice|audio).*(selalu|always)/i) ||
+            lowerMessage.includes('voice mode on') ||
+            lowerMessage.includes('mode suara on') ||
+            lowerMessage.includes('aktifkan mode suara') ||
+            lowerMessage.includes('nyalakan voice') ||
+            lowerMessage.includes('voice terus')) {
+            return 'always';
+        }
+        
+        // Commands for never voice mode
+        if (lowerMessage.match(/(jangan|never|stop).*(suara|voice|audio)/i) ||
+            lowerMessage.match(/(suara|voice|audio).*(jangan|never|stop)/i) ||
+            lowerMessage.includes('voice mode off') ||
+            lowerMessage.includes('mode suara off') ||
+            lowerMessage.includes('matikan mode suara') ||
+            lowerMessage.includes('matikan voice') ||
+            lowerMessage.includes('stop voice') ||
+            lowerMessage.includes('text only')) {
+            return 'never';
+        }
+        
+        // Commands for ask mode (default)
+        if (lowerMessage.includes('voice mode ask') ||
+            lowerMessage.includes('mode suara tanya') ||
+            lowerMessage.includes('tanya dulu') ||
+            lowerMessage.includes('kadang voice') ||
+            lowerMessage.includes('reset voice')) {
+            return 'ask';
+        }
+        
+        return null;
+    }
+
+    /**
+     * Set user voice preference
+     * @param {string} userPhone - User phone number
+     * @param {string} preference - Voice preference ('always', 'never', 'ask')
+     */
+    async setUserVoicePreference(userPhone, preference) {
+        try {
+            // Save to database or session storage
+            await this.sessionManager.setUserSetting(userPhone, 'voice_preference', preference);
+            this.logger.info(`Voice preference set for ${userPhone}: ${preference}`);
+        } catch (error) {
+            this.logger.error('Error setting voice preference:', error);
+        }
+    }
+
+    /**
+     * Get user voice preference
+     * @param {string} userPhone - User phone number
+     * @returns {Promise<string>} - Voice preference ('always', 'never', 'ask')
+     */
+    async getUserVoicePreference(userPhone) {
+        try {
+            const preference = await this.sessionManager.getUserSetting(userPhone, 'voice_preference');
+            return preference || 'ask'; // Default to 'ask'
+        } catch (error) {
+            this.logger.error('Error getting voice preference:', error);
+            return 'ask'; // Default fallback
+        }
+    }
+
+    /**
+     * Get response for voice mode command
+     * @param {string} command - Voice mode command
+     * @returns {string} - Response message
+     */
+    getVoiceModeResponse(command) {
+        switch (command) {
+            case 'always':
+                return `🔊 **Mode Suara Aktif!** 🎵
+
+Oke, mulai sekarang aku akan selalu balas dengan suara untuk setiap pesan kamu di mode curhat ini.
+
+✨ *Fitur aktif:*
+• Semua responsku akan dalam bentuk voice note
+• Tidak perlu minta "pakai suara" lagi
+• Pengalaman curhat yang lebih personal
+
+💡 *Tips:*
+• Kalau mau kembali ke text, bilang "voice mode off"
+• Kalau ada masalah suara, aku otomatis balik ke text
+
+Sekarang cerita aja, aku siap dengerin dengan suara! 🤗`;
+
+            case 'never':
+                return `📝 **Mode Text Aktif!** ✍️
+
+Oke, aku akan balas hanya dengan text untuk pesan-pesan kamu selanjutnya.
+
+✨ *Fitur aktif:*
+• Semua responsku dalam bentuk text
+• Lebih cepat dan hemat data
+• Mudah dibaca ulang
+
+💡 *Tips:*
+• Kalau mau nyoba voice lagi, bilang "voice mode on"
+• Atau minta "pakai suara" untuk sekali doang
+
+Mari lanjut cerita dalam mode text! 😊`;
+
+            case 'ask':
+                return `❓ **Mode Tanya Dulu!** 🤔
+
+Oke, aku akan tanya dulu atau tunggu kamu minta kalau mau respons pakai suara.
+
+✨ *Cara kerja:*
+• Default responsku akan text
+• Kalau mau voice, bilang "pakai suara" di pesanmu
+• Atau aku kadang akan tanya "mau pakai suara?"
+
+💡 *Commands yang bisa kamu pakai:*
+• "voice mode on" → selalu pakai suara
+• "voice mode off" → hanya text
+• "pakai suara" → sekali pakai voice
+
+Gimana, mau lanjut cerita? 😊`;
+
+            default:
+                return 'Mode suara sudah diatur! 🎵';
+        }
     }
 }
 

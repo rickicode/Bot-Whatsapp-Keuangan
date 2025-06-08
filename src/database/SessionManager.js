@@ -597,6 +597,97 @@ class SessionManager {
     }
 
     // ========================================
+    // USER SETTINGS METHODS
+    // ========================================
+
+    /**
+     * Set user setting (like voice preference)
+     * @param {string} userPhone - User phone number
+     * @param {string} settingKey - Setting key
+     * @param {string} settingValue - Setting value
+     */
+    async setUserSetting(userPhone, settingKey, settingValue) {
+        const redisKey = `user_setting:${userPhone}:${settingKey}`;
+        
+        // Always save to PostgreSQL for persistence
+        try {
+            await this.postgresDb.run(`
+                INSERT INTO settings (user_phone, setting_key, setting_value)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_phone, setting_key)
+                DO UPDATE SET setting_value = $3, updated_at = CURRENT_TIMESTAMP
+            `, [userPhone, settingKey, settingValue]);
+            
+            this.logger.info(`User setting saved to PostgreSQL: ${userPhone} - ${settingKey} = ${settingValue}`);
+        } catch (error) {
+            this.logger.error('Failed to save user setting to PostgreSQL:', error);
+            throw error;
+        }
+
+        // Also cache in Redis if available
+        if (this.isRedisAvailable()) {
+            try {
+                await this.redisDb.client.setex(redisKey, 86400, settingValue); // Cache for 24 hours
+                this.logger.debug(`User setting cached in Redis: ${userPhone} - ${settingKey}`);
+            } catch (error) {
+                this.logger.warn('Failed to cache user setting in Redis:', error);
+            }
+        }
+    }
+
+    /**
+     * Get user setting (like voice preference)
+     * @param {string} userPhone - User phone number
+     * @param {string} settingKey - Setting key
+     * @returns {Promise<string|null>} - Setting value or null if not found
+     */
+    async getUserSetting(userPhone, settingKey) {
+        const redisKey = `user_setting:${userPhone}:${settingKey}`;
+        
+        // Try Redis first for faster access
+        if (this.isRedisAvailable()) {
+            try {
+                const cached = await this.redisDb.client.get(redisKey);
+                if (cached !== null) {
+                    this.logger.debug(`User setting retrieved from Redis: ${userPhone} - ${settingKey}`);
+                    return cached;
+                }
+            } catch (error) {
+                this.logger.warn('Failed to get user setting from Redis:', error);
+            }
+        }
+
+        // Fallback to PostgreSQL
+        try {
+            const result = await this.postgresDb.get(
+                'SELECT setting_value FROM settings WHERE user_phone = $1 AND setting_key = $2',
+                [userPhone, settingKey]
+            );
+            
+            if (result) {
+                const value = result.setting_value;
+                
+                // Cache in Redis if available
+                if (this.isRedisAvailable()) {
+                    try {
+                        await this.redisDb.client.setex(redisKey, 86400, value);
+                    } catch (error) {
+                        this.logger.warn('Failed to cache user setting in Redis:', error);
+                    }
+                }
+                
+                this.logger.debug(`User setting retrieved from PostgreSQL: ${userPhone} - ${settingKey}`);
+                return value;
+            }
+            
+            return null;
+        } catch (error) {
+            this.logger.error('Failed to get user setting from PostgreSQL:', error);
+            return null;
+        }
+    }
+
+    // ========================================
     // HEALTH CHECK AND STATS
     // ========================================
 
