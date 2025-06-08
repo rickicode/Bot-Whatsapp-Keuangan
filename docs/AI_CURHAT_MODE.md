@@ -11,6 +11,7 @@ AI Curhat Mode adalah fitur khusus di KasAI yang memungkinkan pengguna untuk ber
 - Mendukung percakapan natural dalam bahasa Indonesia
 - Memberikan dukungan emosional dan perspektif positif
 - Menyimpan konteks percakapan selama sesi aktif
+- **NEW**: Personalized conversation menggunakan nama user dari database
 
 ### 🔒 Session Management
 - Menggunakan Redis untuk performa optimal (fallback ke PostgreSQL)

@@ -581,6 +581,18 @@ class PostgresDatabase extends BaseDatabase {
                 notes TEXT,
                 FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
                 FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )`,
+
+            // Curhat history table untuk menyimpan histori chat curhat mode
+            `CREATE TABLE IF NOT EXISTS curhat_history (
+                id SERIAL PRIMARY KEY,
+                user_phone VARCHAR(20) NOT NULL,
+                session_id VARCHAR(100) NOT NULL,
+                role VARCHAR(20) CHECK(role IN ('user', 'assistant', 'system')) NOT NULL,
+                content TEXT NOT NULL,
+                message_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
             )`
         ];
 
@@ -610,7 +622,13 @@ class PostgresDatabase extends BaseDatabase {
                 'CREATE INDEX IF NOT EXISTS idx_debt_receivables_client ON debt_receivables(client_id)',
                 'CREATE INDEX IF NOT EXISTS idx_debt_receivables_type_status ON debt_receivables(user_phone, type, status)',
                 'CREATE INDEX IF NOT EXISTS idx_debt_receivables_created_at ON debt_receivables(created_at DESC)',
-                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_due_date ON debt_receivables(due_date) WHERE due_date IS NOT NULL'
+                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_due_date ON debt_receivables(due_date) WHERE due_date IS NOT NULL',
+                
+                // Indexes untuk Curhat History table
+                'CREATE INDEX IF NOT EXISTS idx_curhat_history_user_phone ON curhat_history(user_phone)',
+                'CREATE INDEX IF NOT EXISTS idx_curhat_history_session ON curhat_history(user_phone, session_id)',
+                'CREATE INDEX IF NOT EXISTS idx_curhat_history_timestamp ON curhat_history(message_timestamp DESC)',
+                'CREATE INDEX IF NOT EXISTS idx_curhat_history_created_at ON curhat_history(created_at DESC)'
             ];
 
             for (const index of indexes) {
@@ -1005,10 +1023,12 @@ class PostgresDatabase extends BaseDatabase {
             // Drop tables in order to handle foreign key constraints
             const tables = [
                 'ai_interactions',
+                'curhat_history',
                 'whatsapp_sessions',
                 'registration_sessions',
                 'user_subscriptions',
                 'settings',
+                'debt_receivables',
                 'debts',
                 'clients',
                 'transactions',
@@ -1130,6 +1150,172 @@ class PostgresDatabase extends BaseDatabase {
         } catch (error) {
             this.logger.error('Error getting AI interaction stats:', error);
             return [];
+        }
+    }
+
+    /**
+     * Curhat History Management Methods
+     */
+    
+    /**
+     * Save curhat message to history with auto cleanup
+     */
+    async saveCurhatMessage(userPhone, sessionId, role, content) {
+        try {
+            // Insert new message
+            await this.sql`
+                INSERT INTO curhat_history (user_phone, session_id, role, content, message_timestamp)
+                VALUES (${userPhone}, ${sessionId}, ${role}, ${content}, CURRENT_TIMESTAMP)
+            `;
+
+            // Auto cleanup old messages (older than 30 days) for this user
+            await this.cleanupOldCurhatHistory(userPhone);
+
+        } catch (error) {
+            this.logger.error('Error saving curhat message:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get curhat history for a session
+     */
+    async getCurhatHistory(userPhone, sessionId, limit = 50) {
+        try {
+            const history = await this.sql`
+                SELECT role, content, message_timestamp, created_at
+                FROM curhat_history
+                WHERE user_phone = ${userPhone}
+                  AND session_id = ${sessionId}
+                  AND created_at >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY message_timestamp ASC
+                LIMIT ${limit}
+            `;
+
+            return history.map(row => ({
+                role: row.role,
+                content: row.content,
+                timestamp: row.message_timestamp.toISOString()
+            }));
+
+        } catch (error) {
+            this.logger.error('Error getting curhat history:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Clear curhat history for a specific session
+     */
+    async clearCurhatSession(userPhone, sessionId) {
+        try {
+            const result = await this.sql`
+                DELETE FROM curhat_history
+                WHERE user_phone = ${userPhone}
+                  AND session_id = ${sessionId}
+            `;
+
+            this.logger.info(`Cleared ${result.count} curhat messages for session ${sessionId}`);
+            return result.count;
+
+        } catch (error) {
+            this.logger.error('Error clearing curhat session:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Cleanup old curhat history (older than 30 days) for a user
+     */
+    async cleanupOldCurhatHistory(userPhone = null) {
+        try {
+            let result;
+            
+            if (userPhone) {
+                // Cleanup for specific user
+                result = await this.sql`
+                    DELETE FROM curhat_history
+                    WHERE user_phone = ${userPhone}
+                      AND created_at < CURRENT_DATE - INTERVAL '30 days'
+                `;
+            } else {
+                // Cleanup for all users
+                result = await this.sql`
+                    DELETE FROM curhat_history
+                    WHERE created_at < CURRENT_DATE - INTERVAL '30 days'
+                `;
+            }
+
+            if (result.count > 0) {
+                this.logger.info(`Cleaned up ${result.count} old curhat messages${userPhone ? ` for user ${userPhone}` : ''}`);
+            }
+
+            return result.count;
+
+        } catch (error) {
+            this.logger.error('Error cleaning up old curhat history:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get curhat statistics
+     */
+    async getCurhatStats(userPhone = null, days = 7) {
+        try {
+            const userFilter = userPhone ? 'AND user_phone = $1' : '';
+            const params = userPhone ? [userPhone] : [];
+
+            const stats = await this.sql.unsafe(`
+                SELECT
+                    DATE(created_at) as date,
+                    COUNT(*) as total_messages,
+                    COUNT(DISTINCT session_id) as unique_sessions,
+                    COUNT(DISTINCT user_phone) as unique_users,
+                    COUNT(CASE WHEN role = 'user' THEN 1 END) as user_messages,
+                    COUNT(CASE WHEN role = 'assistant' THEN 1 END) as assistant_messages
+                FROM curhat_history
+                WHERE created_at >= CURRENT_DATE - INTERVAL '${days} days'
+                  ${userFilter}
+                GROUP BY DATE(created_at)
+                ORDER BY date DESC
+            `, params);
+
+            return stats;
+
+        } catch (error) {
+            this.logger.error('Error getting curhat stats:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Create scheduled cleanup job for curhat history
+     */
+    async scheduleCleanupCurhatHistory() {
+        try {
+            // Create a function for automatic cleanup (PostgreSQL function)
+            await this.sql`
+                CREATE OR REPLACE FUNCTION cleanup_old_curhat_history()
+                RETURNS INTEGER AS $$
+                DECLARE
+                    deleted_count INTEGER;
+                BEGIN
+                    DELETE FROM curhat_history
+                    WHERE created_at < CURRENT_DATE - INTERVAL '30 days';
+                    
+                    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+                    
+                    RETURN deleted_count;
+                END;
+                $$ LANGUAGE plpgsql;
+            `;
+
+            this.logger.info('Created cleanup function for curhat history');
+
+        } catch (error) {
+            this.logger.error('Error creating cleanup function:', error);
+            throw error;
         }
     }
 }

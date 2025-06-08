@@ -362,8 +362,11 @@ class SessionManager {
             }
         }
 
-        // Fallback to PostgreSQL
+        // Fallback to PostgreSQL - use dedicated curhat_history table
         try {
+            // For PostgreSQL, we'll save individual messages instead of the whole history
+            // This is handled by AICurhatService.saveCurhatMessage method
+            // This method is kept for Redis compatibility
             await this.postgresDb.run(
                 `INSERT INTO settings (user_phone, setting_key, setting_value, updated_at)
                  VALUES ($1, 'curhat_history', $2, CURRENT_TIMESTAMP)
@@ -453,6 +456,114 @@ class SessionManager {
 
         await Promise.allSettled(promises);
         this.logger.info(`Curhat data cleared for phone: ${phone}`);
+    }
+
+    /**
+     * New methods for dedicated curhat_history table
+     */
+    
+    async saveCurhatMessage(phone, sessionId, role, content) {
+        const key = `curhat_session:${phone}:${sessionId}`;
+        
+        // Always save to PostgreSQL for persistent storage
+        try {
+            await this.postgresDb.saveCurhatMessage(phone, sessionId, role, content);
+        } catch (error) {
+            this.logger.error('Failed to save curhat message to PostgreSQL:', error);
+            throw error;
+        }
+
+        // Also update Redis cache if available
+        if (this.isRedisAvailable()) {
+            try {
+                const history = await this.getCurhatSessionHistory(phone, sessionId);
+                await this.redisDb.client.setex(key, 3600, JSON.stringify(history));
+            } catch (error) {
+                this.logger.warn('Failed to update Redis cache for curhat session:', error);
+            }
+        }
+    }
+
+    async getCurhatSessionHistory(phone, sessionId, limit = 50) {
+        const key = `curhat_session:${phone}:${sessionId}`;
+        
+        // Try Redis first
+        if (this.isRedisAvailable()) {
+            try {
+                const cached = await this.redisDb.client.get(key);
+                if (cached) {
+                    return JSON.parse(cached);
+                }
+            } catch (error) {
+                this.logger.warn('Failed to get curhat history from Redis:', error);
+            }
+        }
+
+        // Fallback to PostgreSQL
+        try {
+            const history = await this.postgresDb.getCurhatHistory(phone, sessionId, limit);
+            
+            // Cache in Redis if available
+            if (this.isRedisAvailable() && history.length > 0) {
+                try {
+                    await this.redisDb.client.setex(key, 3600, JSON.stringify(history));
+                } catch (error) {
+                    this.logger.warn('Failed to cache curhat history in Redis:', error);
+                }
+            }
+            
+            return history;
+        } catch (error) {
+            this.logger.error('Failed to get curhat history from PostgreSQL:', error);
+            return [];
+        }
+    }
+
+    async clearCurhatSession(phone, sessionId) {
+        const key = `curhat_session:${phone}:${sessionId}`;
+        
+        // Clear from PostgreSQL
+        try {
+            await this.postgresDb.clearCurhatSession(phone, sessionId);
+        } catch (error) {
+            this.logger.error('Failed to clear curhat session from PostgreSQL:', error);
+        }
+
+        // Clear from Redis
+        if (this.isRedisAvailable()) {
+            try {
+                await this.redisDb.client.del(key);
+            } catch (error) {
+                this.logger.warn('Failed to clear curhat session from Redis:', error);
+            }
+        }
+
+        this.logger.info(`Curhat session ${sessionId} cleared for phone: ${phone}`);
+    }
+
+    async cleanupOldCurhatHistory(phone = null) {
+        try {
+            const deletedCount = await this.postgresDb.cleanupOldCurhatHistory(phone);
+            
+            // Clear related Redis keys if cleaning up for specific user
+            if (phone && this.isRedisAvailable()) {
+                try {
+                    const pattern = `curhat_session:${phone}:*`;
+                    const keys = await this.redisDb.client.keys(pattern);
+                    if (keys.length > 0) {
+                        await this.redisDb.client.del(...keys);
+                        this.logger.info(`Cleared ${keys.length} Redis keys for user ${phone}`);
+                    }
+                } catch (error) {
+                    this.logger.warn('Failed to clear Redis curhat keys:', error);
+                }
+            }
+            
+            return deletedCount;
+        } catch (error) {
+            this.logger.error('Failed to cleanup old curhat history:', error);
+            return 0;
+        }
     }
 
     // ========================================

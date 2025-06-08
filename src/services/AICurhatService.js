@@ -70,6 +70,10 @@ class AICurhatService {
                 };
             }
 
+            // Get user name for personalized greeting
+            const userName = await this.getUserName(userPhone);
+            const greeting = userName ? `Halo ${userName}!` : 'Halo!';
+
             // Set user session to curhat mode
             await this.sessionManager.setCurhatMode(userPhone, true);
             
@@ -80,7 +84,7 @@ class AICurhatService {
             
             const welcomeMessage = `💭 *Mode Curhat Activated* 🤗
 
-Halo! Sekarang kamu dalam mode curhat. Aku siap jadi teman curhat yang baik untuk mendengarkan cerita kamu.
+${greeting} Sekarang kamu dalam mode curhat. Aku siap jadi teman curhat yang baik untuk mendengarkan cerita kamu.
 
 ✨ *Apa yang bisa aku lakukan:*
 • Mendengarkan keluh kesah kamu
@@ -117,7 +121,11 @@ Jadi, ada yang ingin kamu ceritakan hari ini? 😊`;
             // Remove user from curhat mode
             await this.sessionManager.setCurhatMode(userPhone, false);
             
-            // Clear conversation history
+            // Clear conversation history for current session
+            const sessionId = this.generateSessionId(userPhone);
+            await this.sessionManager.clearCurhatSession(userPhone, sessionId);
+            
+            // Also clear old-style history for backward compatibility
             await this.sessionManager.clearCurhatHistory(userPhone);
             
             this.logger.info(`User ${userPhone} exited curhat mode`);
@@ -146,6 +154,35 @@ Semoga harimu menyenangkan! ✨`;
         }
     }
 
+    /**
+     * Generate session ID for curhat conversation
+     * Uses date-based session ID to group conversations by day
+     */
+    generateSessionId(userPhone) {
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+        return `${userPhone}_${today}`;
+    }
+
+    /**
+     * Get user name from database for personalized conversation
+     */
+    async getUserName(userPhone) {
+        try {
+            const user = await this.sessionManager.postgresDb.sql`
+                SELECT name FROM users WHERE phone = ${userPhone}
+            `;
+            
+            if (user && user.length > 0 && user[0].name) {
+                return user[0].name;
+            }
+            
+            return null;
+        } catch (error) {
+            this.logger.warn('Could not fetch user name:', error.message);
+            return null;
+        }
+    }
+
     async handleCurhatMessage(userPhone, message) {
         try {
             if (!this.isEnabled) {
@@ -159,34 +196,21 @@ Semoga harimu menyenangkan! ✨`;
                 return exitResult.message;
             }
 
-            // Get conversation history
-            let history = await this.sessionManager.getCurhatHistory(userPhone) || [];
+            // Generate session ID for this conversation
+            const sessionId = this.generateSessionId(userPhone);
             
-            // Add user message to history
-            history.push({
-                role: 'user',
-                content: message,
-                timestamp: new Date().toISOString()
-            });
-
-            // Generate AI response
-            const aiResponse = await this.generateCurhatResponse(history);
+            // Save user message to persistent storage
+            await this.sessionManager.saveCurhatMessage(userPhone, sessionId, 'user', message);
+            
+            // Get conversation history from persistent storage
+            let history = await this.sessionManager.getCurhatSessionHistory(userPhone, sessionId);
+            
+            // Generate AI response using the history
+            const aiResponse = await this.generateCurhatResponse(userPhone, history);
             
             if (aiResponse) {
-                // Add AI response to history
-                history.push({
-                    role: 'assistant',
-                    content: aiResponse,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Keep only last 20 messages to manage memory
-                if (history.length > 20) {
-                    history = history.slice(-20);
-                }
-
-                // Save updated history
-                await this.sessionManager.setCurhatHistory(userPhone, history);
+                // Save AI response to persistent storage
+                await this.sessionManager.saveCurhatMessage(userPhone, sessionId, 'assistant', aiResponse);
                 
                 return aiResponse;
             } else {
@@ -199,48 +223,77 @@ Semoga harimu menyenangkan! ✨`;
         }
     }
 
-    async generateCurhatResponse(history) {
+    async generateCurhatResponse(userPhone, history) {
         try {
+            // Get user name for personalized conversation
+            const userName = await this.getUserName(userPhone);
+            const nameInstruction = userName ?
+                `NAMA USER: Panggil user dengan nama "${userName}" untuk membuat percakapan lebih personal dan akrab.` :
+                `NAMA USER: User belum memberikan nama, gunakan panggilan "kamu" saja.`;
+            
             // Prepare system prompt for curhat mode
             const systemPrompt = `Kamu adalah seorang teman curhat yang baik, empatik, dan penuh perhatian. Karakteristik kamu:
 
-1. KEPRIBADIAN:
-   - Pendengar yang baik dan tidak menghakimi
-   - Empati tinggi dan memahami perasaan orang
-   - Memberikan dukungan emosional yang tulus
-   - Berbicara dengan bahasa Indonesia yang hangat dan ramah
-   - Menggunakan emoji yang tepat untuk mengekspresikan empati
+            ${nameInstruction}
 
-2. CARA MERESPONS:
-   - Dengarkan dengan sungguh-sungguh apa yang diceritakan
-   - Validasi perasaan mereka ("Aku bisa mengerti perasaan kamu...")
-   - Berikan perspektif positif tanpa mengabaikan masalah mereka
-   - Ajukan pertanyaan yang menunjukkan perhatian
-   - Hindari memberikan solusi langsung kecuali diminta
+            1. IDENTITAS:
+                - Kamu adalah AI bernama ${process.env.BOT_NAME || 'KasAI'}
+                - Kamu dibuat oleh HIJILABS Studios
+                - Jika ditanya tentang identitas, jawab: "Aku adalah ${process.env.BOT_NAME || 'KasAI'}, AI buatan HIJILABS Studios yang siap jadi teman curhat kamu"
+                - Kamu tidak memiliki identitas manusia, tapi kamu bisa memahami perasaan manusia
+                - jika pengguna tanya terus tentang identitas kamu terlalu banyak, jawab saja kalo kamu buatan Ricki AR Pendiri HIJILABS Studios
 
-3. GAYA BAHASA:
-   - Gunakan bahasa informal dan akrab
-   - Panggil dengan "kamu" 
-   - Gunakan kata-kata yang menenangkan
-   - Emoji yang sesuai untuk menunjukkan empati: 😊🤗💙✨🌸
+            2. KEPRIBADIAN:
+                - Pendengar yang baik dan tidak menghakimi
+                - Empati tinggi dan memahami perasaan orang
+                - Memberikan dukungan emosional yang tulus
+                - Berbicara dengan bahasa Indonesia yang hangat dan ramah
+                - Menggunakan emoji yang tepat untuk mengekspresikan empati
 
-4. YANG HARUS DIHINDARI:
-   - Jangan menggurui atau ceramah
-   - Jangan meremehkan masalah mereka
-   - Jangan terlalu cepat memberikan solusi
-   - Jangan mengalihkan topik ke hal lain
+            3. CARA MERESPONS:
+                - Dengarkan dengan sungguh-sungguh apa yang diceritakan
+                - Validasi perasaan mereka ("Aku bisa mengerti perasaan kamu...")
+                - Berikan perspektif positif tanpa mengabaikan masalah mereka
+                - Ajukan pertanyaan yang menunjukkan perhatian
+                - Hindari memberikan solusi langsung kecuali diminta
+                - ${userName ? `Gunakan nama "${userName}" sesekali dalam percakapan untuk lebih akrab` : 'Gunakan panggilan "kamu" dengan hangat'}
 
-5. PANJANG RESPONS:
-   - Berikan respons yang cukup panjang (2-4 kalimat)
-   - Tunjukkan bahwa kamu benar-benar memperhatikan
+            4. GAYA BAHASA:
+                - Gunakan bahasa informal dan akrab
+                - ${userName ? `Panggil dengan nama "${userName}" atau "kamu"` : 'Panggil dengan "kamu"'}
+                - Gunakan kata-kata yang menenangkan
+                - Emoji yang sesuai untuk menunjukkan empati: 😊🤗💙✨🌸
 
-Ingat: Tujuan utama adalah memberikan dukungan emosional dan membuat mereka merasa didengar dan dipahami.`;
+            5. YANG HARUS DIHINDARI:
+                - Jangan menggurui atau ceramah
+                - Jangan meremehkan masalah mereka
+                - Jangan terlalu cepat memberikan solusi
+                - Jangan mengalihkan topik ke hal lain
 
-            // Prepare messages for AI
+            6. PANJANG RESPONS:
+                - Berikan respons yang cukup panjang (minimal 2 kalimat)
+                - Tunjukkan bahwa kamu benar-benar memperhatikan
+
+            7. INFORMASI KELUAR:
+                - Jika user menanyakan cara keluar atau mengakhiri percakapan, beritahu bahwa mereka bisa mengetik:
+                - "selesai", "/quit", atau "/keluar"
+                - Sampaikan dengan hangat bahwa mereka bisa kembali kapan saja
+
+            Ingat: Tujuan utama adalah memberikan dukungan emosional dan membuat mereka merasa didengar dan dipahami.`;
+
+            // Prepare messages for AI - convert from our format to OpenAI format
             const messages = [
-                { role: 'system', content: systemPrompt },
-                ...history.slice(-10) // Only send last 10 messages for context
+                { role: 'system', content: systemPrompt }
             ];
+            
+            // Add conversation history (last 10 messages for context)
+            const recentHistory = history.slice(-10);
+            for (const msg of recentHistory) {
+                messages.push({
+                    role: msg.role,
+                    content: msg.content
+                });
+            }
 
             // Make API request based on provider
             const response = await this.makeAIRequest(messages);
