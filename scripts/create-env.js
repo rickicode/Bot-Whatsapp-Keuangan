@@ -122,9 +122,14 @@ const DEFAULT_VALUES = {
     'OPENAI_COMPATIBLE_BASE_URL': 'https://api.your-provider.com',
     'OPENAI_COMPATIBLE_MODEL': 'your_model_name',
     
-    // Database Configuration (SQLite default)
-    'DATABASE_TYPE': 'sqlite3',
-    'DB_PATH': '/app/data/financial.db',
+    // Database Configuration (PostgreSQL default)
+    'DATABASE_TYPE': 'postgres',
+    'DATABASE_HOST': 'localhost',
+    'DATABASE_PORT': '5432',
+    'DATABASE_NAME': 'financial_bot',
+    'DATABASE_USER': 'postgres',
+    'DATABASE_PASSWORD': 'your_password_here',
+    'DATABASE_SSL': 'false',
     'BACKUP_PATH': '/app/backups',
     
     // Database Pool Configuration
@@ -252,12 +257,12 @@ function createEnvFile() {
         // Database validation
         const dbType = process.env.DATABASE_TYPE || DEFAULT_VALUES.DATABASE_TYPE;
         if (dbType === 'postgres' || dbType === 'postgresql') {
-            const dbRequiredVars = ['DATABASE_HOST', 'DATABASE_PASSWORD'];
-            const dbMissing = dbRequiredVars.filter(key => !process.env[key]);
+            const dbRequiredVars = ['DATABASE_HOST', 'DATABASE_PASSWORD', 'DATABASE_NAME', 'DATABASE_USER'];
+            const dbMissing = dbRequiredVars.filter(key => !process.env[key] && !DEFAULT_VALUES[key]);
             if (dbMissing.length > 0) {
                 console.warn('⚠️  PostgreSQL database configuration incomplete:');
                 console.warn('   Missing:', dbMissing.join(', '));
-                console.warn('   Will fallback to SQLite database');
+                console.warn('   Please provide PostgreSQL configuration or use Supabase URL');
             }
         }
         

@@ -84,21 +84,14 @@ NODE_ENV=development npm run migrate:fresh
 
 The migration system works with all supported database types:
 
-- **SQLite3** (default for development)
-- **PostgreSQL** (recommended for production)
-- **Supabase** (PostgreSQL cloud)
+- **PostgreSQL** (recommended for all environments)
+- **Supabase** (PostgreSQL cloud with built-in features)
 
 ## Environment Configuration
 
 Set up your database configuration in `.env`:
 
-### SQLite (Development)
-```env
-DATABASE_TYPE=sqlite3
-DB_PATH=./data/financial.db
-```
-
-### PostgreSQL (Production)
+### PostgreSQL (Local/Production)
 ```env
 DATABASE_TYPE=postgres
 DATABASE_HOST=localhost
@@ -106,12 +99,23 @@ DATABASE_PORT=5432
 DATABASE_NAME=financial_bot
 DATABASE_USER=your_username
 DATABASE_PASSWORD=your_password
+DATABASE_SSL=false
 ```
 
-### Supabase (Cloud)
+### Supabase (Cloud PostgreSQL)
 ```env
-DATABASE_TYPE=supabase
-SUPABASE_DB_URL=postgresql://postgres.xxx:password@aws-0-region.pooler.supabase.com:5432/postgres
+DATABASE_DB_URL=postgresql://postgres.xxx:password@aws-0-region.pooler.supabase.com:5432/postgres
+```
+
+### Alternative Supabase Configuration
+```env
+DATABASE_TYPE=postgres
+DATABASE_HOST=your-project.supabase.co
+DATABASE_PORT=5432
+DATABASE_NAME=postgres
+DATABASE_USER=postgres
+DATABASE_PASSWORD=your_password
+DATABASE_SSL=true
 ```
 
 ## Common Workflows

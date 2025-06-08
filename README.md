@@ -192,8 +192,8 @@ ENABLE_REMINDERS=true
 ```
 
 ### Database Configuration
-- **SQLite** (default): Lightweight, perfect for personal use
-- **PostgreSQL**: Available for scaling (modify DatabaseManager.js)
+- **PostgreSQL** (default): Robust database for production environments
+- **Supabase**: Cloud PostgreSQL with built-in features and easy setup
 
 ## 📱 Commands Reference
 
@@ -525,14 +525,13 @@ NODE_ENV=development npm run migrate:fresh
 - ✅ **Safe Schema Updates** - Non-destructive migrations for production
 - ✅ **Data Seeding** - Populate database with default categories and plans
 - ✅ **Fresh Reset** - Complete database recreation for development
-- ✅ **Multi-Database Support** - Works with SQLite, PostgreSQL, and Supabase
+- ✅ **Multi-Database Support** - Works with PostgreSQL and Supabase
 - ✅ **Production Protection** - Fresh migrations disabled in production
 - ✅ **Error Handling** - Comprehensive error handling and rollback
 
 #### Database Support
-- **SQLite3** (default) - Perfect for development and small deployments
-- **PostgreSQL** - Recommended for production environments
-- **Supabase** - Cloud PostgreSQL with built-in features
+- **PostgreSQL** - Primary database for all environments
+- **Supabase** - Cloud PostgreSQL with built-in features and easy setup
 
 See [Migration Guide](docs/MIGRATION_GUIDE.md) for detailed instructions.
 ```
@@ -633,7 +632,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Baileys](https://github.com/WhiskeySockets/Baileys) - WhatsApp Web API (Multi-Device)
 - [DeepSeek](https://deepseek.com/) - AI API for intelligent features
-- [SQLite](https://sqlite.org/) - Lightweight database
+- [PostgreSQL](https://postgresql.org/) - Robust and reliable database
+- [Supabase](https://supabase.com/) - Cloud PostgreSQL with built-in features
 - [Node.js](https://nodejs.org/) - Runtime environment
 
 ## 📞 Support
