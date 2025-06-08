@@ -4,6 +4,7 @@ const Logger = require('../utils/Logger');
 class DatabaseManager {
     constructor() {
         this.db = null;
+        this.sessionManager = null;
         this.logger = new Logger();
     }
 
@@ -15,7 +16,14 @@ class DatabaseManager {
             // Initialize the database
             await this.db.initialize();
             
-            this.logger.info('Database initialized successfully');
+            // Initialize SessionManager for Redis/PostgreSQL session handling
+            this.sessionManager = DatabaseFactory.createSessionManager();
+            const postgresConfig = DatabaseFactory.getPostgresConfig();
+            const redisConfig = DatabaseFactory.getRedisConfig();
+            
+            await this.sessionManager.initialize(postgresConfig, redisConfig);
+            
+            this.logger.info('Database and SessionManager initialized successfully');
         } catch (error) {
             this.logger.error('Error initializing database:', error);
             throw error;
@@ -23,6 +31,9 @@ class DatabaseManager {
     }
 
     async close() {
+        if (this.sessionManager) {
+            await this.sessionManager.close();
+        }
         if (this.db) {
             await this.db.close();
         }
@@ -313,27 +324,42 @@ class DatabaseManager {
     }
 
     async createRegistrationSession(phone) {
-        await this.run(
-            `INSERT INTO registration_sessions (phone, step, session_data, expires_at)
-             VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours')
-             ON CONFLICT (phone) DO UPDATE SET
-             step = $2, session_data = $3, expires_at = CURRENT_TIMESTAMP + INTERVAL '24 hours', created_at = CURRENT_TIMESTAMP`,
-            [phone, 'name', '{}']
-        );
+        if (this.sessionManager) {
+            await this.sessionManager.createRegistrationSession(phone);
+        } else {
+            // Fallback to direct PostgreSQL
+            await this.run(
+                `INSERT INTO registration_sessions (phone, step, session_data, expires_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '24 hours')
+                 ON CONFLICT (phone) DO UPDATE SET
+                 step = $2, session_data = $3, expires_at = CURRENT_TIMESTAMP + INTERVAL '24 hours', created_at = CURRENT_TIMESTAMP`,
+                [phone, 'name', '{}']
+            );
+        }
     }
 
     async getRegistrationSession(phone) {
-        return await this.get(
-            'SELECT * FROM registration_sessions WHERE phone = $1 AND expires_at > CURRENT_TIMESTAMP',
-            [phone]
-        );
+        if (this.sessionManager) {
+            return await this.sessionManager.getRegistrationSession(phone);
+        } else {
+            // Fallback to direct PostgreSQL
+            return await this.get(
+                'SELECT * FROM registration_sessions WHERE phone = $1 AND expires_at > CURRENT_TIMESTAMP',
+                [phone]
+            );
+        }
     }
 
     async updateRegistrationSession(phone, step, sessionData) {
-        await this.run(
-            'UPDATE registration_sessions SET step = $1, session_data = $2 WHERE phone = $3',
-            [step, JSON.stringify(sessionData), phone]
-        );
+        if (this.sessionManager) {
+            await this.sessionManager.updateRegistrationSession(phone, step, sessionData);
+        } else {
+            // Fallback to direct PostgreSQL
+            await this.run(
+                'UPDATE registration_sessions SET step = $1, session_data = $2 WHERE phone = $3',
+                [step, JSON.stringify(sessionData), phone]
+            );
+        }
     }
 
     async completeUserRegistration(phone, name, email, city) {
@@ -361,7 +387,11 @@ class DatabaseManager {
             }
             
             // Delete registration session
-            await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
+            if (this.sessionManager) {
+                await this.sessionManager.deleteRegistrationSession(phone);
+            } else {
+                await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
+            }
             
             await this.commit();
             
@@ -383,7 +413,11 @@ class DatabaseManager {
     }
 
     async deleteRegistrationSession(phone) {
-        await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
+        if (this.sessionManager) {
+            await this.sessionManager.deleteRegistrationSession(phone);
+        } else {
+            await this.run('DELETE FROM registration_sessions WHERE phone = $1', [phone]);
+        }
     }
 
     // Categories are now global - no need to copy per user
@@ -489,8 +523,98 @@ class DatabaseManager {
 
     // Cleanup expired registration sessions
     async cleanupExpiredRegistrationSessions() {
-        const result = await this.run('DELETE FROM registration_sessions WHERE expires_at < CURRENT_TIMESTAMP');
-        return result.changes || 0;
+        if (this.sessionManager) {
+            return await this.sessionManager.cleanupExpiredRegistrationSessions();
+        } else {
+            const result = await this.run('DELETE FROM registration_sessions WHERE expires_at < CURRENT_TIMESTAMP');
+            return result.changes || 0;
+        }
+    }
+
+    // ========================================
+    // WHATSAPP SESSION MANAGEMENT
+    // ========================================
+
+    async saveWhatsAppSession(clientId, sessionData) {
+        if (this.sessionManager) {
+            await this.sessionManager.saveWhatsAppSession(clientId, sessionData);
+        } else {
+            // Fallback to direct PostgreSQL
+            await this.run(
+                'INSERT INTO whatsapp_sessions (client_id, session_data, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP) ON CONFLICT (client_id) DO UPDATE SET session_data = $2, updated_at = CURRENT_TIMESTAMP',
+                [clientId, JSON.stringify(sessionData)]
+            );
+        }
+    }
+
+    async getWhatsAppSession(clientId) {
+        if (this.sessionManager) {
+            return await this.sessionManager.getWhatsAppSession(clientId);
+        } else {
+            // Fallback to direct PostgreSQL
+            const result = await this.get(
+                'SELECT session_data FROM whatsapp_sessions WHERE client_id = $1',
+                [clientId]
+            );
+            return result ? JSON.parse(result.session_data) : null;
+        }
+    }
+
+    async deleteWhatsAppSession(clientId) {
+        if (this.sessionManager) {
+            await this.sessionManager.deleteWhatsAppSession(clientId);
+        } else {
+            // Fallback to direct PostgreSQL
+            await this.run(
+                'DELETE FROM whatsapp_sessions WHERE client_id = $1',
+                [clientId]
+            );
+        }
+    }
+
+    // ========================================
+    // SESSION MANAGEMENT STATS & HEALTH
+    // ========================================
+
+    async getSessionStats() {
+        if (this.sessionManager) {
+            return await this.sessionManager.getSessionStats();
+        } else {
+            // Return basic PostgreSQL stats
+            const waResult = await this.get('SELECT COUNT(*) as count FROM whatsapp_sessions');
+            const regResult = await this.get('SELECT COUNT(*) as count FROM registration_sessions WHERE expires_at > CURRENT_TIMESTAMP');
+            
+            return {
+                timestamp: new Date().toISOString(),
+                redis: {
+                    whatsappSessions: 0,
+                    registrationSessions: 0,
+                    totalSessions: 0
+                },
+                postgresql: {
+                    whatsappSessions: waResult ? parseInt(waResult.count) : 0,
+                    registrationSessions: regResult ? parseInt(regResult.count) : 0
+                }
+            };
+        }
+    }
+
+    async getSessionHealthCheck() {
+        if (this.sessionManager) {
+            return await this.sessionManager.healthCheck();
+        } else {
+            return {
+                timestamp: new Date().toISOString(),
+                redis: {
+                    enabled: false,
+                    available: false,
+                    status: 'disabled'
+                },
+                postgresql: {
+                    status: 'healthy'
+                }
+            };
+        }
     }
 
     // Admin Management
