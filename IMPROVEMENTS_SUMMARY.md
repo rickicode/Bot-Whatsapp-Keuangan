@@ -48,6 +48,17 @@ JANGAN MENGALIKAN AMOUNT YANG SUDAH BENAR!
 - ✅ Advanced prediction methodology dengan Monte Carlo simulation
 - ✅ Risk assessment dan scenario analysis
 - ✅ Actionable recommendations dengan specific timelines
+
+### 4. **AI Curhat Mode** 💭 **NEW!**
+- ✅ Separate AI companion mode untuk emotional support
+- ✅ Independent AI provider configuration (dapat menggunakan provider berbeda)
+- ✅ Session management dengan Redis/PostgreSQL fallback
+- ✅ Empathetic conversation handling dengan Indonesian language
+- ✅ Secure conversation history dengan auto cleanup
+- ✅ Easy toggle: `/curhat` untuk masuk, `/quit` untuk keluar
+- ✅ **FIXED**: Consistent HTTP client dengan AIService (menggunakan `axios`)
+- ✅ **FIXED**: Proper API endpoint (`/v1/chat/completions` sesuai AIService)
+- ✅ **TESTED**: API request dan full conversation flow berfungsi sempurna
 - ✅ Health scoring dan early warning indicators
 
 ### 4. **AIPromptTester Framework** 🧪

@@ -3,14 +3,16 @@ const TransactionService = require('../services/TransactionService');
 const ReportService = require('../services/ReportService');
 const CategoryService = require('../services/CategoryService');
 const DebtReceivableService = require('../services/DebtReceivableService');
+const AICurhatService = require('../services/AICurhatService');
 const moment = require('moment');
 
 class CommandHandler {
-    constructor(database, aiService, client, indonesianAI = null) {
+    constructor(database, aiService, client, indonesianAI = null, sessionManager = null) {
         this.db = database;
         this.ai = aiService;
         this.client = client;
         this.indonesianAI = indonesianAI;
+        this.sessionManager = sessionManager;
         this.logger = new Logger();
         
         // Initialize services
@@ -18,6 +20,11 @@ class CommandHandler {
         this.reportService = new ReportService(database, aiService);
         this.categoryService = new CategoryService(database);
         this.debtReceivableService = new DebtReceivableService(database, aiService);
+        
+        // Initialize AI Curhat service if sessionManager is provided
+        if (this.sessionManager) {
+            this.aiCurhatService = new AICurhatService(this.sessionManager);
+        }
         
         // Command mappings
         this.commands = {
@@ -79,6 +86,11 @@ class CommandHandler {
             '/kategori-otomatis': this.handleAutoCategory.bind(this),
             '/auto-category': this.handleAutoCategory.bind(this),
             
+            // AI Curhat Mode
+            '/curhat': this.handleCurhat.bind(this),
+            '/quit': this.handleQuitCurhat.bind(this),
+            '/keluar': this.handleQuitCurhat.bind(this),
+            
             // Data management
             '/edit': this.handleEdit.bind(this),
             '/hapus': this.handleDelete.bind(this),
@@ -131,6 +143,13 @@ class CommandHandler {
             
             // Note: User registration and authentication is now handled by IndonesianAIAssistant
             // We assume user is already registered and authenticated when reaching this point
+            
+            // Check if user is in curhat mode
+            if (this.aiCurhatService && await this.aiCurhatService.isUserInCurhatMode(userPhone)) {
+                const response = await this.aiCurhatService.handleCurhatMessage(userPhone, text);
+                await message.reply(response);
+                return;
+            }
             
             // Check if user has pending transaction confirmation
             if (await this.handlePendingTransaction(message, userPhone, text)) {
@@ -810,6 +829,12 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 • /prediksi-ai - Prediksi keuangan masa depan
 • /ringkasan-ai [periode] - Ringkasan AI (harian/mingguan/bulanan)
 • /kategori-otomatis - Auto kategorisasi transaksi dengan AI
+
+💭 *MODE CURHAT AI:*
+
+• /curhat - Masuk mode curhat (teman bicara AI)
+• Dalam mode curhat: berbicaralah bebas seperti dengan teman
+• /quit atau "selesai" - Keluar dari mode curhat
 
 💳 *BULK TRANSAKSI AI (FITUR BARU!):*
 
@@ -4070,7 +4095,8 @@ Permen 2k
                 helpText += `/analisis - Analisis pengeluaran\n`;
                 helpText += `/saran - Saran keuangan\n`;
                 helpText += `/prediksi-ai - Prediksi trend\n`;
-                helpText += `/bulk Makan 25k, transport 10k, kopi 5k\n\n`;
+                helpText += `/bulk Makan 25k, transport 10k, kopi 5k\n`;
+                helpText += `/curhat - Mode AI curhat (teman bicara)\n\n`;
             }
 
             helpText += `💡 *TIPS PENGGUNAAN:*\n`;
@@ -4140,6 +4166,49 @@ Permen 2k
         } catch (error) {
             this.logger.error('Error in handleTrialStatus:', error);
             await message.reply('❌ Terjadi kesalahan saat mengecek status trial.');
+        }
+    }
+
+    // ========================================
+    // AI CURHAT MODE HANDLERS
+    // ========================================
+
+    async handleCurhat(message, userPhone, args) {
+        try {
+            if (!this.aiCurhatService) {
+                await message.reply('❌ Mode curhat tidak tersedia. Session manager tidak dikonfigurasi.');
+                return;
+            }
+
+            const result = await this.aiCurhatService.enterCurhatMode(userPhone);
+            await message.reply(result.message);
+            
+        } catch (error) {
+            this.logger.error('Error entering curhat mode:', error);
+            await message.reply('❌ Terjadi kesalahan saat memulai mode curhat.');
+        }
+    }
+
+    async handleQuitCurhat(message, userPhone, args) {
+        try {
+            if (!this.aiCurhatService) {
+                await message.reply('❌ Mode curhat tidak tersedia.');
+                return;
+            }
+
+            // Check if user is actually in curhat mode
+            const isInCurhatMode = await this.aiCurhatService.isUserInCurhatMode(userPhone);
+            if (!isInCurhatMode) {
+                await message.reply('💡 Anda sedang tidak dalam mode curhat. Ketik /curhat untuk memulai mode curhat.');
+                return;
+            }
+
+            const result = await this.aiCurhatService.exitCurhatMode(userPhone);
+            await message.reply(result.message);
+            
+        } catch (error) {
+            this.logger.error('Error exiting curhat mode:', error);
+            await message.reply('❌ Terjadi kesalahan saat keluar dari mode curhat.');
         }
     }
 }

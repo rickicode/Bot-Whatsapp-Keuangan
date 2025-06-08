@@ -779,8 +779,8 @@ class WhatsAppFinancialBot {
             defaultQueryTimeoutMs: undefined,
         });
 
-        // Initialize command handler with the socket
-        this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock, this.indonesianAI);
+        // Initialize command handler with the socket and sessionManager
+        this.commandHandler = new CommandHandler(this.db, this.aiService, this.sock, this.indonesianAI, this.db.sessionManager);
         
         // Initialize typing manager with the socket
         this.typingManager = new TypingManager(this.sock);

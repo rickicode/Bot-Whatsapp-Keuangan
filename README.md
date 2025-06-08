@@ -43,6 +43,14 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 - ✅ **Validation & Fallback** - Built-in amount validation with fallback parsing
 - 🧪 **Quality Assurance** - Comprehensive testing framework for AI accuracy
 
+### 💭 AI Curhat Mode (NEW!)
+- 🤗 **Personal AI Companion** - Separate AI mode for emotional support and conversation
+- 💙 **Empathetic Responses** - AI trained to be a caring, non-judgmental friend
+- 🔒 **Session Management** - Secure conversation sessions with Redis/PostgreSQL fallback
+- 🎯 **Separate Configuration** - Independent AI provider settings for curhat mode
+- 🌟 **Natural Conversation** - Free-flowing chat in Indonesian language
+- 🚪 **Easy Toggle** - Simple `/curhat` to enter, `/quit` to exit back to finance mode
+
 ### Advanced Features
 - 📊 **Comprehensive Reporting** - Daily, weekly, monthly, yearly reports
 - 💾 **Data Export** - CSV exports for accounting software
@@ -201,6 +209,16 @@ ALLOWED_USERS=+1234567890,+0987654321
 ENABLE_AI_FEATURES=true
 ENABLE_OCR=true
 ENABLE_REMINDERS=true
+
+# AI Curhat Mode (NEW!)
+AI_CURHAT_ENABLED=true
+AI_CURHAT_PROVIDER=openrouter
+AI_CURHAT_MODEL=anthropic/claude-3-haiku
+
+# Additional AI Providers (for curhat or main AI)
+OPENROUTER_API_KEY=your_openrouter_key
+GROQ_API_KEY=your_groq_key
+OPENAI_API_KEY=your_openai_key
 ```
 
 ### Database Configuration
@@ -249,6 +267,10 @@ Permen 2k
 /prediksi-ai      # AI cash flow prediction
 /ringkasan-ai     # AI financial summary
 /kategori-otomatis # Auto-categorize transactions
+
+# AI Curhat Mode (NEW!)
+/curhat           # Enter personal AI companion mode
+/quit             # Exit curhat mode back to finance
 ```
 
 ### Debt & Receivable Management (NEW!)

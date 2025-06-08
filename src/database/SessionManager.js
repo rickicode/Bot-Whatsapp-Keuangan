@@ -278,6 +278,184 @@ class SessionManager {
     }
 
     // ========================================
+    // AI CURHAT MODE METHODS
+    // ========================================
+
+    async setCurhatMode(phone, isActive) {
+        const key = `curhat_mode:${phone}`;
+        
+        if (this.isRedisAvailable()) {
+            try {
+                if (isActive) {
+                    await this.redisDb.client.setex(key, 3600, 'true'); // Expire after 1 hour of inactivity
+                } else {
+                    await this.redisDb.client.del(key);
+                }
+                this.logger.info(`Curhat mode ${isActive ? 'activated' : 'deactivated'} in Redis for phone: ${phone}`);
+                return;
+            } catch (error) {
+                this.logger.error(`Redis curhat mode operation failed for ${phone}, falling back to PostgreSQL:`, error);
+                this.redisAvailable = false;
+            }
+        }
+
+        // Fallback to PostgreSQL
+        try {
+            if (isActive) {
+                await this.postgresDb.run(
+                    `INSERT INTO settings (user_phone, setting_key, setting_value, updated_at)
+                     VALUES ($1, 'curhat_mode', 'true', CURRENT_TIMESTAMP)
+                     ON CONFLICT (user_phone, setting_key)
+                     DO UPDATE SET setting_value = 'true', updated_at = CURRENT_TIMESTAMP`,
+                    [phone]
+                );
+            } else {
+                await this.postgresDb.run(
+                    'DELETE FROM settings WHERE user_phone = $1 AND setting_key = $2',
+                    [phone, 'curhat_mode']
+                );
+            }
+            this.logger.info(`Curhat mode ${isActive ? 'activated' : 'deactivated'} in PostgreSQL for phone: ${phone}`);
+        } catch (error) {
+            this.logger.error('Failed to set curhat mode in PostgreSQL:', error);
+            throw error;
+        }
+    }
+
+    async isInCurhatMode(phone) {
+        const key = `curhat_mode:${phone}`;
+        
+        if (this.isRedisAvailable()) {
+            try {
+                const result = await this.redisDb.client.get(key);
+                return result === 'true';
+            } catch (error) {
+                this.logger.error(`Redis curhat mode check failed for ${phone}, falling back to PostgreSQL:`, error);
+                this.redisAvailable = false;
+            }
+        }
+
+        // Fallback to PostgreSQL
+        try {
+            const result = await this.postgresDb.get(
+                'SELECT setting_value FROM settings WHERE user_phone = $1 AND setting_key = $2',
+                [phone, 'curhat_mode']
+            );
+            return result && result.setting_value === 'true';
+        } catch (error) {
+            this.logger.error('Failed to check curhat mode in PostgreSQL:', error);
+            return false;
+        }
+    }
+
+    async setCurhatHistory(phone, history) {
+        const key = `curhat_history:${phone}`;
+        
+        if (this.isRedisAvailable()) {
+            try {
+                await this.redisDb.client.setex(key, 3600, JSON.stringify(history)); // Expire after 1 hour
+                this.logger.info(`Curhat history saved in Redis for phone: ${phone}`);
+                return;
+            } catch (error) {
+                this.logger.error(`Redis curhat history save failed for ${phone}, falling back to PostgreSQL:`, error);
+                this.redisAvailable = false;
+            }
+        }
+
+        // Fallback to PostgreSQL
+        try {
+            await this.postgresDb.run(
+                `INSERT INTO settings (user_phone, setting_key, setting_value, updated_at)
+                 VALUES ($1, 'curhat_history', $2, CURRENT_TIMESTAMP)
+                 ON CONFLICT (user_phone, setting_key)
+                 DO UPDATE SET setting_value = $2, updated_at = CURRENT_TIMESTAMP`,
+                [phone, JSON.stringify(history)]
+            );
+            this.logger.info(`Curhat history saved in PostgreSQL for phone: ${phone}`);
+        } catch (error) {
+            this.logger.error('Failed to save curhat history in PostgreSQL:', error);
+            throw error;
+        }
+    }
+
+    async getCurhatHistory(phone) {
+        const key = `curhat_history:${phone}`;
+        
+        if (this.isRedisAvailable()) {
+            try {
+                const result = await this.redisDb.client.get(key);
+                if (result) {
+                    return JSON.parse(result);
+                }
+            } catch (error) {
+                this.logger.error(`Redis curhat history get failed for ${phone}, falling back to PostgreSQL:`, error);
+                this.redisAvailable = false;
+            }
+        }
+
+        // Fallback to PostgreSQL
+        try {
+            const result = await this.postgresDb.get(
+                'SELECT setting_value FROM settings WHERE user_phone = $1 AND setting_key = $2',
+                [phone, 'curhat_history']
+            );
+            
+            if (result) {
+                const history = JSON.parse(result.setting_value);
+                
+                // If Redis is available, cache the history
+                if (this.isRedisAvailable()) {
+                    try {
+                        await this.redisDb.client.setex(key, 3600, JSON.stringify(history));
+                    } catch (error) {
+                        this.logger.warn('Failed to cache curhat history in Redis:', error);
+                    }
+                }
+                
+                return history;
+            }
+            
+            return [];
+        } catch (error) {
+            this.logger.error('Failed to get curhat history from PostgreSQL:', error);
+            return [];
+        }
+    }
+
+    async clearCurhatHistory(phone) {
+        const historyKey = `curhat_history:${phone}`;
+        const modeKey = `curhat_mode:${phone}`;
+        
+        // Clear from both Redis and PostgreSQL
+        const promises = [];
+
+        if (this.isRedisAvailable()) {
+            promises.push(
+                this.redisDb.client.del(historyKey).catch(error => {
+                    this.logger.error(`Failed to delete curhat history from Redis for ${phone}:`, error);
+                })
+            );
+            promises.push(
+                this.redisDb.client.del(modeKey).catch(error => {
+                    this.logger.error(`Failed to delete curhat mode from Redis for ${phone}:`, error);
+                })
+            );
+        }
+
+        promises.push(
+            this.postgresDb.run(
+                'DELETE FROM settings WHERE user_phone = $1 AND setting_key IN ($2, $3)',
+                [phone, 'curhat_history', 'curhat_mode']
+            ).catch(error => {
+                this.logger.error(`Failed to delete curhat data from PostgreSQL for ${phone}:`, error);
+            })
+        );
+
+        await Promise.allSettled(promises);
+        this.logger.info(`Curhat data cleared for phone: ${phone}`);
+    }
+
+    // ========================================
     // MAINTENANCE METHODS
     // ========================================
 
