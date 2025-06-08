@@ -15,19 +15,16 @@ class CategoryService {
 
             // Check if category already exists
             const existing = await this.db.get(
-                'SELECT * FROM categories WHERE user_phone = ? AND name = ? AND type = ?',
-                [userPhone, name, type]
+                'SELECT * FROM categories WHERE name = $1 AND type = $2',
+                [name, type]
             );
 
             if (existing) {
                 throw new Error(`Kategori "${name}" sudah ada untuk ${type === 'income' ? 'pemasukan' : 'pengeluaran'}`);
             }
 
-            // Add category
-            const result = await this.db.run(
-                'INSERT INTO categories (user_phone, name, type, color) VALUES (?, ?, ?, ?)',
-                [userPhone, name, type, color]
-            );
+            // Add category (now global categories, admin only)
+            const result = await this.db.addCategory(userPhone, name, type, color);
 
             this.logger.info(`Category added: ${userPhone} - ${name} (${type})`);
 
@@ -45,17 +42,8 @@ class CategoryService {
 
     async getCategories(userPhone, type = null) {
         try {
-            let sql = 'SELECT * FROM categories WHERE user_phone IN (?, "default") AND is_active = true';
-            let params = [userPhone];
-
-            if (type) {
-                sql += ' AND type = ?';
-                params.push(type);
-            }
-
-            sql += ' ORDER BY user_phone DESC, name ASC';
-
-            return await this.db.all(sql, params);
+            // Use DatabaseManager method for consistent global categories
+            return await this.db.getCategories(userPhone, type);
         } catch (error) {
             this.logger.error('Error getting categories:', error);
             throw new Error('Gagal mendapatkan kategori');
@@ -64,42 +52,12 @@ class CategoryService {
 
     async updateCategory(userPhone, categoryId, updates) {
         try {
-            // Verify category belongs to user (not default)
-            const category = await this.db.get(
-                'SELECT * FROM categories WHERE id = ? AND user_phone = ?',
-                [categoryId, userPhone]
-            );
-
-            if (!category) {
-                throw new Error('Kategori tidak ditemukan atau tidak dapat diubah');
-            }
-
-            const allowedFields = ['name', 'color', 'is_active'];
-            const updateFields = Object.keys(updates)
-                .filter(key => allowedFields.includes(key))
-                .map(key => `${key} = ?`);
-
-            if (updateFields.length === 0) {
-                throw new Error('Tidak ada field valid untuk diupdate');
-            }
-
-            const values = Object.keys(updates)
-                .filter(key => allowedFields.includes(key))
-                .map(key => updates[key]);
-
-            values.push(categoryId, userPhone);
-
-            await this.db.run(
-                `UPDATE categories SET ${updateFields.join(', ')} WHERE id = ? AND user_phone = ?`,
-                values
-            );
+            // Use DatabaseManager method for consistent category updates (admin only)
+            await this.db.updateCategory(userPhone, categoryId, updates);
 
             this.logger.info(`Category updated: ${categoryId} by ${userPhone}`);
 
-            return await this.db.get(
-                'SELECT * FROM categories WHERE id = ?',
-                [categoryId]
-            );
+            return await this.db.getCategoryById(categoryId);
         } catch (error) {
             this.logger.error('Error updating category:', error);
             throw error;
@@ -108,37 +66,17 @@ class CategoryService {
 
     async deleteCategory(userPhone, categoryId) {
         try {
-            // Verify category belongs to user (not default)
-            const category = await this.db.get(
-                'SELECT * FROM categories WHERE id = ? AND user_phone = ?',
-                [categoryId, userPhone]
-            );
-
+            // Get category before deletion
+            const category = await this.db.getCategoryById(categoryId);
+            
             if (!category) {
-                throw new Error('Kategori tidak ditemukan atau tidak dapat dihapus');
+                throw new Error('Kategori tidak ditemukan');
             }
 
-            // Check if category is being used in transactions
-            const transactionCount = await this.db.get(
-                'SELECT COUNT(*) as count FROM transactions WHERE category_id = ?',
-                [categoryId]
-            );
+            // Use DatabaseManager method for consistent category deletion (admin only)
+            await this.db.deleteCategory(userPhone, categoryId);
 
-            if (transactionCount.count > 0) {
-                // Soft delete - mark as inactive
-                await this.db.run(
-                    'UPDATE categories SET is_active = false WHERE id = ?',
-                    [categoryId]
-                );
-                this.logger.info(`Category soft deleted: ${categoryId}`);
-            } else {
-                // Hard delete - no transactions using it
-                await this.db.run(
-                    'DELETE FROM categories WHERE id = ?',
-                    [categoryId]
-                );
-                this.logger.info(`Category hard deleted: ${categoryId}`);
-            }
+            this.logger.info(`Category deleted: ${categoryId} by ${userPhone}`);
 
             return category;
         } catch (error) {
@@ -210,22 +148,22 @@ class CategoryService {
                 case 'mingguan':
                 case 'minggu':
                 case 'week':
-                    dateFilter = "AND date >= date('now', '-7 days')";
+                    dateFilter = `AND t.date >= CURRENT_DATE - INTERVAL '7 days'`;
                     break;
                 case 'bulanan':
                 case 'bulan':
                 case 'month':
-                    dateFilter = "AND date >= date('now', 'start of month')";
+                    dateFilter = `AND t.date >= DATE_TRUNC('month', CURRENT_DATE)`;
                     break;
                 case 'tahunan':
                 case 'tahun':
                 case 'year':
-                    dateFilter = "AND date >= date('now', 'start of year')";
+                    dateFilter = `AND t.date >= DATE_TRUNC('year', CURRENT_DATE)`;
                     break;
             }
 
             const stats = await this.db.all(`
-                SELECT 
+                SELECT
                     c.id,
                     c.name,
                     c.type,
@@ -235,13 +173,13 @@ class CategoryService {
                     COALESCE(AVG(t.amount), 0) as avg_amount,
                     MAX(t.date) as last_transaction
                 FROM categories c
-                LEFT JOIN transactions t ON c.id = t.category_id AND t.user_phone = ? ${dateFilter}
-                WHERE c.user_phone IN (?, 'default') AND c.is_active = true
+                LEFT JOIN transactions t ON c.id = t.category_id AND t.user_phone = $1 ${dateFilter}
+                WHERE c.is_active = true
                 GROUP BY c.id, c.name, c.type, c.color
                 ORDER BY total_amount DESC
-            `, params.concat([userPhone]));
+            `, params);
 
-            return stats;
+            return stats || [];
         } catch (error) {
             this.logger.error('Error getting category stats:', error);
             throw new Error('Gagal mendapatkan statistik kategori');

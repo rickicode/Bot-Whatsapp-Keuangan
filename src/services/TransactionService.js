@@ -189,38 +189,44 @@ class TransactionService {
                 SELECT t.*, c.name as category_name, c.color as category_color
                 FROM transactions t
                 LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = ?
+                WHERE t.user_phone = $1
             `;
             
             const params = [userPhone];
+            let paramCount = 2;
 
             // Apply filters
             if (type) {
-                sql += ' AND t.type = ?';
+                sql += ` AND t.type = $${paramCount}`;
                 params.push(type);
+                paramCount++;
             }
 
             if (categoryId) {
-                sql += ' AND t.category_id = ?';
+                sql += ` AND t.category_id = $${paramCount}`;
                 params.push(categoryId);
+                paramCount++;
             }
 
             if (startDate) {
-                sql += ' AND t.date >= ?';
+                sql += ` AND t.date >= $${paramCount}`;
                 params.push(startDate);
+                paramCount++;
             }
 
             if (endDate) {
-                sql += ' AND t.date <= ?';
+                sql += ` AND t.date <= $${paramCount}`;
                 params.push(endDate);
+                paramCount++;
             }
 
             if (search) {
-                sql += ' AND (t.description LIKE ? OR c.name LIKE ?)';
+                sql += ` AND (t.description ILIKE $${paramCount} OR c.name ILIKE $${paramCount + 1})`;
                 params.push(`%${search}%`, `%${search}%`);
+                paramCount += 2;
             }
 
-            sql += ' ORDER BY t.date DESC, t.created_at DESC LIMIT ? OFFSET ?';
+            sql += ` ORDER BY t.date DESC, t.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
             params.push(limit, offset);
 
             return await this.db.all(sql, params);
@@ -295,57 +301,72 @@ class TransactionService {
     }
 
     async getBalanceForPeriod(userPhone, startDate, endDate) {
-        const income = await this.db.get(`
-            SELECT COALESCE(SUM(amount), 0) as total 
-            FROM transactions 
-            WHERE user_phone = ? AND type = 'income' AND date BETWEEN ? AND ?
-        `, [userPhone, startDate, endDate]);
-        
-        const expenses = await this.db.get(`
-            SELECT COALESCE(SUM(amount), 0) as total 
-            FROM transactions 
-            WHERE user_phone = ? AND type = 'expense' AND date BETWEEN ? AND ?
-        `, [userPhone, startDate, endDate]);
-        
-        return {
-            income: income.total,
-            expenses: expenses.total,
-            balance: income.total - expenses.total
-        };
+        try {
+            const income = await this.db.get(`
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM transactions
+                WHERE user_phone = $1 AND type = 'income' AND date BETWEEN $2 AND $3
+            `, [userPhone, startDate, endDate]);
+            
+            const expenses = await this.db.get(`
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM transactions
+                WHERE user_phone = $1 AND type = 'expense' AND date BETWEEN $2 AND $3
+            `, [userPhone, startDate, endDate]);
+            
+            return {
+                income: income?.total || 0,
+                expenses: expenses?.total || 0,
+                balance: (income?.total || 0) - (expenses?.total || 0)
+            };
+        } catch (error) {
+            this.logger.error('Error getting balance for period:', error);
+            throw new Error('Gagal mendapatkan saldo untuk periode');
+        }
     }
 
     async getCategoryBreakdown(userPhone, startDate, endDate) {
-        const breakdown = await this.db.all(`
-            SELECT 
-                c.name as category_name,
-                c.color as category_color,
-                t.type,
-                SUM(t.amount) as total_amount,
-                COUNT(t.id) as transaction_count
-            FROM transactions t
-            LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.user_phone = ? AND t.date BETWEEN ? AND ?
-            GROUP BY c.id, t.type
-            ORDER BY total_amount DESC
-        `, [userPhone, startDate, endDate]);
-        
-        return {
-            income: breakdown.filter(b => b.type === 'income'),
-            expenses: breakdown.filter(b => b.type === 'expense')
-        };
+        try {
+            const breakdown = await this.db.all(`
+                SELECT
+                    c.name as category_name,
+                    c.color as category_color,
+                    t.type,
+                    SUM(t.amount) as total_amount,
+                    COUNT(t.id) as transaction_count
+                FROM transactions t
+                LEFT JOIN categories c ON t.category_id = c.id
+                WHERE t.user_phone = $1 AND t.date BETWEEN $2 AND $3
+                GROUP BY c.id, c.name, c.color, t.type
+                ORDER BY total_amount DESC
+            `, [userPhone, startDate, endDate]);
+            
+            return {
+                income: breakdown.filter(b => b.type === 'income'),
+                expenses: breakdown.filter(b => b.type === 'expense')
+            };
+        } catch (error) {
+            this.logger.error('Error getting category breakdown:', error);
+            throw new Error('Gagal mendapatkan breakdown kategori');
+        }
     }
 
     async getDailyTrends(userPhone, startDate, endDate) {
-        return await this.db.all(`
-            SELECT 
-                DATE(date) as day,
-                type,
-                SUM(amount) as daily_total
-            FROM transactions
-            WHERE user_phone = ? AND date BETWEEN ? AND ?
-            GROUP BY DATE(date), type
-            ORDER BY day
-        `, [userPhone, startDate, endDate]);
+        try {
+            return await this.db.all(`
+                SELECT
+                    date as day,
+                    type,
+                    SUM(amount) as daily_total
+                FROM transactions
+                WHERE user_phone = $1 AND date BETWEEN $2 AND $3
+                GROUP BY date, type
+                ORDER BY day
+            `, [userPhone, startDate, endDate]);
+        } catch (error) {
+            this.logger.error('Error getting daily trends:', error);
+            throw new Error('Gagal mendapatkan tren harian');
+        }
     }
 
     async processReceiptImage(userPhone, imageBuffer) {

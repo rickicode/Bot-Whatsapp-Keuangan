@@ -35,7 +35,7 @@ class ReminderService {
                 SELECT b.*, c.name as category_name
                 FROM bills b
                 LEFT JOIN categories c ON b.category_id = c.id
-                WHERE b.user_phone = ? AND b.is_active = true AND b.next_reminder <= CURRENT_DATE
+                WHERE b.user_phone = $1 AND b.is_active = true AND b.next_reminder <= CURRENT_DATE
             `, [userPhone]);
 
             if (dueBills.length === 0) return;
@@ -122,8 +122,9 @@ class ReminderService {
                 // Update debt status to overdue
                 const debtIds = debts.map(d => d.id);
                 if (debtIds.length > 0) {
+                    const placeholders = debtIds.map((_, index) => `$${index + 1}`).join(',');
                     await this.db.run(
-                        `UPDATE debts SET status = 'overdue' WHERE id IN (${debtIds.map(() => '?').join(',')})`,
+                        `UPDATE debts SET status = 'overdue' WHERE id IN (${placeholders})`,
                         debtIds
                     );
                 }
@@ -153,7 +154,7 @@ class ReminderService {
                 case 'one-time':
                     // Disable the bill after one-time reminder
                     await this.db.run(
-                        'UPDATE bills SET is_active = false WHERE id = ?',
+                        'UPDATE bills SET is_active = false WHERE id = $1',
                         [billId]
                     );
                     return;
@@ -162,7 +163,7 @@ class ReminderService {
             }
 
             await this.db.run(
-                'UPDATE bills SET next_reminder = ? WHERE id = ?',
+                'UPDATE bills SET next_reminder = $1 WHERE id = $2',
                 [nextReminder, billId]
             );
 
@@ -178,7 +179,7 @@ class ReminderService {
 
             const result = await this.db.run(`
                 INSERT INTO bills (user_phone, name, amount, category_id, due_date, frequency, next_reminder)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
             `, [userPhone, name, amount, categoryId, dueDate, frequency, nextReminder]);
 
             this.logger.info(`Bill added: ${userPhone} - ${name} - ${amount}`);
@@ -204,7 +205,7 @@ class ReminderService {
                 SELECT b.*, c.name as category_name
                 FROM bills b
                 LEFT JOIN categories c ON b.category_id = c.id
-                WHERE b.user_phone = ?
+                WHERE b.user_phone = $1
             `;
             
             const params = [userPhone];
@@ -227,7 +228,7 @@ class ReminderService {
         try {
             // Verify bill belongs to user
             const bill = await this.db.get(
-                'SELECT * FROM bills WHERE id = ? AND user_phone = ?',
+                'SELECT * FROM bills WHERE id = $1 AND user_phone = $2',
                 [billId, userPhone]
             );
 
@@ -236,9 +237,10 @@ class ReminderService {
             }
 
             const allowedFields = ['name', 'amount', 'category_id', 'due_date', 'frequency', 'is_active'];
+            let paramCount = 1;
             const updateFields = Object.keys(updates)
                 .filter(key => allowedFields.includes(key))
-                .map(key => `${key} = ?`);
+                .map(key => `${key} = $${paramCount++}`);
 
             if (updateFields.length === 0) {
                 throw new Error('No valid fields to update');
@@ -252,21 +254,21 @@ class ReminderService {
             if (updates.due_date || updates.frequency) {
                 const newDueDate = updates.due_date || bill.due_date;
                 const nextReminder = moment(newDueDate).subtract(1, 'day').format('YYYY-MM-DD');
-                updateFields.push('next_reminder = ?');
+                updateFields.push(`next_reminder = $${paramCount++}`);
                 values.push(nextReminder);
             }
 
             values.push(billId, userPhone);
 
             await this.db.run(
-                `UPDATE bills SET ${updateFields.join(', ')} WHERE id = ? AND user_phone = ?`,
+                `UPDATE bills SET ${updateFields.join(', ')} WHERE id = $${paramCount++} AND user_phone = $${paramCount}`,
                 values
             );
 
             this.logger.info(`Bill updated: ${billId} by ${userPhone}`);
 
             return await this.db.get(
-                'SELECT * FROM bills WHERE id = ?',
+                'SELECT * FROM bills WHERE id = $1',
                 [billId]
             );
 
@@ -280,7 +282,7 @@ class ReminderService {
         try {
             // Verify bill belongs to user
             const bill = await this.db.get(
-                'SELECT * FROM bills WHERE id = ? AND user_phone = ?',
+                'SELECT * FROM bills WHERE id = $1 AND user_phone = $2',
                 [billId, userPhone]
             );
 
@@ -289,7 +291,7 @@ class ReminderService {
             }
 
             await this.db.run(
-                'DELETE FROM bills WHERE id = ? AND user_phone = ?',
+                'DELETE FROM bills WHERE id = $1 AND user_phone = $2',
                 [billId, userPhone]
             );
 
@@ -311,8 +313,8 @@ class ReminderService {
                 SELECT b.*, c.name as category_name
                 FROM bills b
                 LEFT JOIN categories c ON b.category_id = c.id
-                WHERE b.user_phone = ?
-                AND b.due_date BETWEEN CURRENT_DATE AND ?
+                WHERE b.user_phone = $1
+                AND b.due_date BETWEEN CURRENT_DATE AND $2
                 AND b.is_active = true
                 ORDER BY b.due_date ASC
             `, [userPhone, endDate]);

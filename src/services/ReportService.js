@@ -55,18 +55,18 @@ class ReportService {
 
         // Get balance data
         const balance = await this.db.get(`
-            SELECT 
+            SELECT
                 COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
                 COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expenses
-            FROM transactions 
-            WHERE user_phone = ? AND date BETWEEN ? AND ?
+            FROM transactions
+            WHERE user_phone = $1 AND date BETWEEN $2 AND $3
         `, [userPhone, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
 
         const netBalance = balance.income - balance.expenses;
 
         // Get category breakdown
         const categoryData = await this.db.all(`
-            SELECT 
+            SELECT
                 c.name as category_name,
                 t.type,
                 SUM(t.amount) as total_amount,
@@ -74,21 +74,21 @@ class ReportService {
                 ROUND(AVG(t.amount), 0) as avg_amount
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.user_phone = ? AND t.date BETWEEN ? AND ?
-            GROUP BY c.id, t.type
+            WHERE t.user_phone = $1 AND t.date BETWEEN $2 AND $3
+            GROUP BY c.id, c.name, t.type
             ORDER BY total_amount DESC
         `, [userPhone, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
 
         // Get transaction trends (daily)
         const dailyData = await this.db.all(`
-            SELECT 
-                DATE(date) as day,
+            SELECT
+                date as day,
                 SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as daily_income,
                 SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as daily_expenses,
                 COUNT(id) as daily_transactions
             FROM transactions
-            WHERE user_phone = ? AND date BETWEEN ? AND ?
-            GROUP BY DATE(date)
+            WHERE user_phone = $1 AND date BETWEEN $2 AND $3
+            GROUP BY date
             ORDER BY day
         `, [userPhone, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
 
@@ -97,7 +97,7 @@ class ReportService {
             SELECT t.*, c.name as category_name
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.user_phone = ? AND t.date BETWEEN ? AND ?
+            WHERE t.user_phone = $1 AND t.date BETWEEN $2 AND $3
             ORDER BY t.amount DESC
             LIMIT 5
         `, [userPhone, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
@@ -116,11 +116,11 @@ class ReportService {
         const prevEndDate = endDate.clone().subtract(1, periodUnit);
         
         const prevBalance = await this.db.get(`
-            SELECT 
+            SELECT
                 COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
                 COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expenses
-            FROM transactions 
-            WHERE user_phone = ? AND date BETWEEN ? AND ?
+            FROM transactions
+            WHERE user_phone = $1 AND date BETWEEN $2 AND $3
         `, [userPhone, prevStartDate.format('YYYY-MM-DD'), prevEndDate.format('YYYY-MM-DD')]);
 
         return {
@@ -262,7 +262,7 @@ class ReportService {
 
     async generateWeeklySummary() {
         try {
-            const users = await this.db.all('SELECT DISTINCT user_phone FROM transactions WHERE date >= date("now", "-7 days")');
+            const users = await this.db.all('SELECT DISTINCT user_phone FROM transactions WHERE date >= CURRENT_DATE - INTERVAL \'7 days\'');
             
             let summary = `📊 *Ringkasan Sistem Mingguan*\n\n`;
             summary += `📅 ${moment().subtract(7, 'days').format('DD/MM/YYYY')} - ${moment().format('DD/MM/YYYY')}\n\n`;
@@ -326,43 +326,49 @@ class ReportService {
     }
 
     async getMonthlyTrends(userPhone, monthCount = 6) {
-        const trends = [];
-        
-        for (let i = 0; i < monthCount; i++) {
-            const startDate = moment().subtract(i, 'month').startOf('month');
-            const endDate = moment().subtract(i, 'month').endOf('month');
+        try {
+            const trends = [];
             
-            const balance = await this.db.get(`
-                SELECT 
-                    COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
-                    COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expenses
-                FROM transactions 
-                WHERE user_phone = ? AND date BETWEEN ? AND ?
-            `, [userPhone, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
+            for (let i = 0; i < monthCount; i++) {
+                const startDate = moment().subtract(i, 'month').startOf('month');
+                const endDate = moment().subtract(i, 'month').endOf('month');
+                
+                const balance = await this.db.get(`
+                    SELECT
+                        COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
+                        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expenses
+                    FROM transactions
+                    WHERE user_phone = $1 AND date BETWEEN $2 AND $3
+                `, [userPhone, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
+                
+                trends.unshift({
+                    month: startDate.format('MMM YYYY'),
+                    income: balance?.income || 0,
+                    expenses: balance?.expenses || 0,
+                    net: (balance?.income || 0) - (balance?.expenses || 0)
+                });
+            }
             
-            trends.unshift({
-                month: startDate.format('MMM YYYY'),
-                income: balance.income,
-                expenses: balance.expenses,
-                net: balance.income - balance.expenses
-            });
+            return trends;
+        } catch (error) {
+            this.logger.error('Error getting monthly trends:', error);
+            return [];
         }
-        
-        return trends;
     }
 
     async exportToCsv(userPhone, startDate = null, endDate = null) {
         try {
             let dateFilter = '';
             const params = [userPhone];
+            let paramCount = 2;
             
             if (startDate && endDate) {
-                dateFilter = 'AND t.date BETWEEN ? AND ?';
+                dateFilter = `AND t.date BETWEEN $${paramCount} AND $${paramCount + 1}`;
                 params.push(startDate, endDate);
             }
             
             const transactions = await this.db.all(`
-                SELECT 
+                SELECT
                     t.id,
                     t.date,
                     t.type,
@@ -372,14 +378,14 @@ class ReportService {
                     t.created_at
                 FROM transactions t
                 LEFT JOIN categories c ON t.category_id = c.id
-                WHERE t.user_phone = ? ${dateFilter}
+                WHERE t.user_phone = $1 ${dateFilter}
                 ORDER BY t.date DESC, t.created_at DESC
             `, params);
             
             // Convert to CSV format
             const csvHeader = 'ID,Date,Type,Amount,Description,Category,Created At\n';
-            const csvRows = transactions.map(t => 
-                `${t.id},"${t.date}","${t.type}",${t.amount},"${t.description}","${t.category_name || ''}","${t.created_at}"`
+            const csvRows = transactions.map(t =>
+                `${t.id},"${t.date}","${t.type}",${t.amount},"${t.description?.replace(/"/g, '""') || ''}","${t.category_name?.replace(/"/g, '""') || ''}","${t.created_at}"`
             ).join('\n');
             
             return csvHeader + csvRows;
