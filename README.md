@@ -31,14 +31,17 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 - ✅ **Payment Tracking** - Mark debts as paid with timestamp
 - 🔍 **Smart Detection** - Auto-detect HUTANG vs PIUTANG from text
 
-### AI-Powered Features (DeepSeek Integration)
-- 🤖 **Natural Language Processing** - "I spent 50k for lunch today"
-- 🤖 **Smart Categorization** - AI suggests appropriate categories
-- 🤖 **Auto-Capitalize Descriptions** - "habis jajan sate ayam 10k" → "Jajan Sate Ayam"
-- 🤖 **Financial Analysis** - AI-powered spending pattern analysis
-- 🤖 **Cash Flow Predictions** - AI-based financial forecasting
-- 🤖 **Financial Advice** - Personalized recommendations
-- 🤖 **Conversational Interface** - Ask questions about your finances
+### 🤖 AI-Powered Features (Enhanced & Improved!)
+- 🎯 **Accurate Amount Parsing** - FIXED: "40K" now correctly parsed as 40,000 (not 40,000,000!)
+- 🇮🇩 **Indonesian NLP** - Perfect understanding of "10K", "1.5jt", "25rb", "500ribu" formats
+- 🤖 **Smart Categorization** - AI suggests appropriate categories with confidence scoring
+- 🤖 **Auto-Clean Descriptions** - "habis jajan sate ayam 10k" → "Jajan Sate Ayam"
+- 📊 **Advanced Financial Analysis** - AI health scoring, risk assessment, actionable insights
+- 🔮 **Enhanced Predictions** - Monte Carlo simulation, scenario analysis, trend forecasting
+- 💡 **Intelligent Advice** - Context-aware recommendations with specific action items
+- 🤖 **Conversational Interface** - Ask complex financial questions in Indonesian
+- ✅ **Validation & Fallback** - Built-in amount validation with fallback parsing
+- 🧪 **Quality Assurance** - Comprehensive testing framework for AI accuracy
 
 ### Advanced Features
 - 📊 **Comprehensive Reporting** - Daily, weekly, monthly, yearly reports

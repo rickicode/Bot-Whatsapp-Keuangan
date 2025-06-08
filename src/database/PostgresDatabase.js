@@ -1009,7 +1009,6 @@ class PostgresDatabase extends BaseDatabase {
                 'registration_sessions',
                 'user_subscriptions',
                 'settings',
-                'bills',
                 'debts',
                 'clients',
                 'transactions',
@@ -1069,6 +1068,68 @@ class PostgresDatabase extends BaseDatabase {
         } catch (error) {
             this.logger.error('Error during PostgreSQL seeding:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Log AI interactions for monitoring and improvement
+     */
+    async logAIInteraction(userPhone, prompt, response, type = 'general') {
+        try {
+            // Create ai_interactions table if it doesn't exist
+            await this.sql`
+                CREATE TABLE IF NOT EXISTS ai_interactions (
+                    id SERIAL PRIMARY KEY,
+                    user_phone VARCHAR(20) NOT NULL,
+                    interaction_type VARCHAR(50) DEFAULT 'general',
+                    prompt TEXT,
+                    response TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
+                )
+            `;
+
+            // Insert the interaction log
+            await this.sql`
+                INSERT INTO ai_interactions (user_phone, interaction_type, prompt, response)
+                VALUES (${userPhone}, ${type}, ${prompt}, ${response})
+            `;
+
+            // Only log in debug mode to avoid spam
+            if (process.env.DEBUG_AI_INTERACTIONS === 'true') {
+                this.logger.info(`AI interaction logged for ${userPhone}: ${type}`);
+            }
+
+        } catch (error) {
+            // Don't throw error for logging failures, just warn
+            this.logger.warn('Failed to log AI interaction:', error.message);
+        }
+    }
+
+    /**
+     * Get AI interaction statistics for monitoring
+     */
+    async getAIInteractionStats(userPhone = null, days = 7) {
+        try {
+            const dateFilter = `created_at >= CURRENT_DATE - INTERVAL '${days} days'`;
+            const userFilter = userPhone ? `AND user_phone = $1` : '';
+            const params = userPhone ? [userPhone] : [];
+
+            const stats = await this.sql.unsafe(`
+                SELECT
+                    interaction_type,
+                    COUNT(*) as count,
+                    DATE(created_at) as date
+                FROM ai_interactions
+                WHERE ${dateFilter} ${userFilter}
+                GROUP BY interaction_type, DATE(created_at)
+                ORDER BY date DESC, interaction_type
+            `, params);
+
+            return stats;
+        } catch (error) {
+            this.logger.error('Error getting AI interaction stats:', error);
+            return [];
         }
     }
 }

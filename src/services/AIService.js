@@ -1,13 +1,23 @@
 const axios = require('axios');
 const Logger = require('../utils/Logger');
+const AmountParser = require('../utils/AmountParser');
 
 class AIService {
     constructor() {
         this.logger = new Logger();
+        this.amountParser = new AmountParser();
         this.isEnabled = process.env.ENABLE_AI_FEATURES === 'true';
         
         // Initialize AI provider configuration
         this.initializeProvider();
+        
+        // Initialize fallback providers
+        this.initializeFallbackProviders();
+        
+        // Track current provider and rate limit status
+        this.currentProviderIndex = 0;
+        this.rateLimitedProviders = new Set();
+        this.lastRateLimitReset = Date.now();
     }
 
     initializeProvider() {
@@ -27,6 +37,12 @@ class AIService {
                 this.model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
                 break;
                 
+            case 'openrouter':
+                this.apiKey = process.env.OPENROUTER_API_KEY;
+                this.baseURL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api';
+                this.model = process.env.OPENROUTER_MODEL || 'openai/gpt-3.5-turbo';
+                break;
+                
             case 'openaicompatible':
             case 'openai-compatible':
                 this.apiKey = process.env.OPENAI_COMPATIBLE_API_KEY;
@@ -41,7 +57,7 @@ class AIService {
                 break;
                 
             default:
-                this.logger.error(`Unknown AI provider: ${this.provider}. Supported providers: deepseek, openai, openaicompatible`);
+                this.logger.error(`Unknown AI provider: ${this.provider}. Supported providers: deepseek, openai, openrouter, openaicompatible`);
                 this.isEnabled = false;
                 return;
         }
@@ -59,55 +75,196 @@ class AIService {
         }
     }
 
+    initializeFallbackProviders() {
+        this.fallbackProviders = [];
+        
+        // If primary is openaicompatible, check for multiple API keys
+        if (this.provider === 'openaicompatible' && this.apiKey) {
+            const apiKeys = this.apiKey.split(',').map(key => key.trim()).filter(key => key);
+            
+            // Create providers for each API key
+            apiKeys.forEach((key, index) => {
+                this.fallbackProviders.push({
+                    name: `openaicompatible-${index + 1}`,
+                    provider: 'openaicompatible',
+                    apiKey: key,
+                    baseURL: this.baseURL,
+                    model: this.model,
+                    priority: index + 1
+                });
+            });
+        }
+        
+        // Get fallback order from environment variable
+        const fallbackOrder = process.env.AI_FALLBACK_ORDER || 'openrouter,deepseek,openai,groq';
+        const orderedProviders = fallbackOrder.split(',').map(p => p.trim().toLowerCase());
+        
+        // Initialize fallback providers based on configured order
+        orderedProviders.forEach((providerName, index) => {
+            const basePriority = 100 + (index * 10); // Start at 100, increment by 10
+            
+            switch (providerName) {
+                case 'deepseek':
+                    if (process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY !== this.apiKey) {
+                        this.fallbackProviders.push({
+                            name: 'deepseek-fallback',
+                            provider: 'deepseek',
+                            apiKey: process.env.DEEPSEEK_API_KEY,
+                            baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+                            model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+                            priority: basePriority
+                        });
+                    }
+                    break;
+                    
+                case 'openrouter':
+                    if (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY !== this.apiKey) {
+                        this.fallbackProviders.push({
+                            name: 'openrouter-fallback',
+                            provider: 'openrouter',
+                            apiKey: process.env.OPENROUTER_API_KEY,
+                            baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api',
+                            model: process.env.OPENROUTER_MODEL || 'openai/gpt-3.5-turbo',
+                            priority: basePriority
+                        });
+                    }
+                    break;
+                    
+                case 'openai':
+                    if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== this.apiKey) {
+                        this.fallbackProviders.push({
+                            name: 'openai-fallback',
+                            provider: 'openai',
+                            apiKey: process.env.OPENAI_API_KEY,
+                            baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com',
+                            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+                            priority: basePriority
+                        });
+                    }
+                    break;
+                    
+                case 'groq':
+                    if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== this.apiKey) {
+                        this.fallbackProviders.push({
+                            name: 'groq-fallback',
+                            provider: 'openaicompatible', // Groq uses OpenAI compatible API
+                            apiKey: process.env.GROQ_API_KEY,
+                            baseURL: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai',
+                            model: process.env.GROQ_MODEL || 'llama3-8b-8192',
+                            priority: basePriority
+                        });
+                    }
+                    break;
+                    
+                default:
+                    this.logger.warn(`Unknown fallback provider in AI_FALLBACK_ORDER: ${providerName}`);
+                    break;
+            }
+        });
+        
+        // Sort by priority
+        this.fallbackProviders.sort((a, b) => a.priority - b.priority);
+        
+        if (this.fallbackProviders.length > 0) {
+            this.logger.info(`Initialized ${this.fallbackProviders.length} fallback AI providers (ordered):`,
+                this.fallbackProviders.map(p => `${p.name} (${p.provider}, priority: ${p.priority})`));
+            this.logger.info(`Fallback order: ${orderedProviders.join(' → ')}`);
+        }
+    }
+
     async makeRequest(messages, temperature = 0.7, maxTokens = 1000) {
         if (!this.isEnabled) {
             throw new Error('Fitur AI tidak aktif');
         }
 
-        try {
-            // Prepare request payload
-            const payload = {
-                model: this.model,
-                messages: messages,
-                temperature: temperature,
-                max_tokens: maxTokens,
-                stream: false
-            };
-
-            // Prepare headers
-            const headers = {
-                'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json'
-            };
-
-            // Make API request
-            const response = await axios.post(`${this.baseURL}/v1/chat/completions`, payload, {
-                headers: headers,
-                timeout: 30000
-            });
-
-            // Extract response
-            if (!response.data || !response.data.choices || !response.data.choices[0]) {
-                throw new Error('Invalid response format from AI provider');
-            }
-
-            return response.data.choices[0].message.content;
-        } catch (error) {
-            this.logger.error(`${this.provider.toUpperCase()} API error:`, error.response?.data || error.message);
-            
-            // More specific error messages based on error type
-            if (error.response?.status === 401) {
-                throw new Error('API key tidak valid. Periksa konfigurasi AI provider.');
-            } else if (error.response?.status === 429) {
-                throw new Error('Rate limit tercapai. Coba lagi dalam beberapa saat.');
-            } else if (error.response?.status >= 500) {
-                throw new Error('Server AI provider sedang mengalami masalah. Coba lagi nanti.');
-            } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-                throw new Error('Tidak dapat terhubung ke AI provider. Periksa URL dan koneksi internet.');
-            } else {
-                throw new Error('Layanan AI sementara tidak tersedia');
-            }
+        // Reset rate limited providers periodically (every 10 minutes)
+        if (Date.now() - this.lastRateLimitReset > 10 * 60 * 1000) {
+            this.rateLimitedProviders.clear();
+            this.lastRateLimitReset = Date.now();
+            this.logger.info('Reset rate limited providers - retrying all providers');
         }
+
+        // Try primary provider first
+        try {
+            return await this.makeRequestWithProvider({
+                name: `${this.provider}-primary`,
+                provider: this.provider,
+                apiKey: this.apiKey,
+                baseURL: this.baseURL,
+                model: this.model
+            }, messages, temperature, maxTokens);
+        } catch (error) {
+            // If primary provider hits rate limit, try fallbacks
+            if (this.isRateLimitError(error)) {
+                this.logger.warn(`Primary provider ${this.provider} hit rate limit, trying fallbacks...`);
+                this.rateLimitedProviders.add(`${this.provider}-primary`);
+                
+                // Try fallback providers
+                for (const provider of this.fallbackProviders) {
+                    if (this.rateLimitedProviders.has(provider.name)) {
+                        continue; // Skip rate limited providers
+                    }
+                    
+                    try {
+                        this.logger.info(`Trying fallback provider: ${provider.name}`);
+                        const result = await this.makeRequestWithProvider(provider, messages, temperature, maxTokens);
+                        this.logger.info(`✅ Successfully used fallback provider: ${provider.name}`);
+                        return result;
+                    } catch (fallbackError) {
+                        if (this.isRateLimitError(fallbackError)) {
+                            this.logger.warn(`Fallback provider ${provider.name} also hit rate limit`);
+                            this.rateLimitedProviders.add(provider.name);
+                        } else {
+                            this.logger.warn(`Fallback provider ${provider.name} failed:`, fallbackError.message);
+                        }
+                    }
+                }
+                
+                // All providers are rate limited or failed
+                this.logger.error('All AI providers are rate limited or unavailable');
+                throw new Error('RATE_LIMITED_ALL_PROVIDERS');
+            }
+            
+            // Non-rate-limit error, rethrow
+            throw error;
+        }
+    }
+
+    async makeRequestWithProvider(providerConfig, messages, temperature, maxTokens) {
+        // Prepare request payload
+        const payload = {
+            model: providerConfig.model,
+            messages: messages,
+            temperature: temperature,
+            max_tokens: maxTokens,
+            stream: false
+        };
+
+        // Prepare headers
+        const headers = {
+            'Authorization': `Bearer ${providerConfig.apiKey}`,
+            'Content-Type': 'application/json'
+        };
+
+        // Make API request
+        const response = await axios.post(`${providerConfig.baseURL}/v1/chat/completions`, payload, {
+            headers: headers,
+            timeout: 30000
+        });
+
+        // Extract response
+        if (!response.data || !response.data.choices || !response.data.choices[0]) {
+            throw new Error('Invalid response format from AI provider');
+        }
+
+        return response.data.choices[0].message.content;
+    }
+
+    isRateLimitError(error) {
+        if (error.response?.status === 429) return true;
+        if (error.message && error.message.toLowerCase().includes('rate limit')) return true;
+        if (error.response?.data && JSON.stringify(error.response.data).toLowerCase().includes('rate limit')) return true;
+        return false;
     }
 
     getProviderInfo() {
@@ -170,6 +327,13 @@ class AIService {
                 { id: 'gpt-4', name: 'GPT-4', owned_by: 'openai' },
                 { id: 'gpt-4-turbo-preview', name: 'GPT-4 Turbo', owned_by: 'openai' }
             ],
+            openrouter: [
+                { id: 'openai/gpt-3.5-turbo', name: 'GPT-3.5 Turbo (OpenRouter)', owned_by: 'openai' },
+                { id: 'openai/gpt-4', name: 'GPT-4 (OpenRouter)', owned_by: 'openai' },
+                { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku', owned_by: 'anthropic' },
+                { id: 'meta-llama/llama-3-8b-instruct', name: 'Llama 3 8B Instruct', owned_by: 'meta' },
+                { id: 'mistralai/mixtral-8x7b-instruct', name: 'Mixtral 8x7B Instruct', owned_by: 'mistralai' }
+            ],
             groq: [
                 { id: 'llama3-8b-8192', name: 'Llama 3 8B', owned_by: 'meta' },
                 { id: 'llama3-70b-8192', name: 'Llama 3 70B', owned_by: 'meta' },
@@ -187,6 +351,8 @@ class AIService {
                 providerKey = 'deepseek';
             } else if (this.baseURL.includes('openai.com')) {
                 providerKey = 'openai';
+            } else if (this.baseURL.includes('openrouter.ai')) {
+                providerKey = 'openrouter';
             }
         }
 
@@ -239,23 +405,39 @@ class AIService {
     }
 
     async parseNaturalLanguageTransaction(text, userPhone, indonesianAI = null) {
-        const systemPrompt = `Kamu adalah parser transaksi keuangan untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak detail transaksi.
+        const systemPrompt = `Kamu adalah parser transaksi keuangan yang ahli untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak detail transaksi dengan akurat.
+
+RULES PARSING AMOUNT (SANGAT PENTING):
+- "10K" = 10.000 (sepuluh ribu)
+- "10k" = 10.000 (sepuluh ribu)
+- "50K" = 50.000 (lima puluh ribu)
+- "100K" = 100.000 (seratus ribu)
+- "1jt" = 1.000.000 (satu juta)
+- "1.5jt" = 1.500.000 (satu setengah juta)
+- "2,5juta" = 2.500.000 (dua setengah juta)
+- "15rb" = 15.000 (lima belas ribu)
+- "25ribu" = 25.000 (dua puluh lima ribu)
+- Untuk angka tanpa suffix: gunakan nilai asli (contoh: "10000" = 10.000)
+
+JANGAN MENGALIKAN AMOUNT YANG SUDAH BENAR!
 
 Kembalikan HANYA objek JSON dengan field berikut:
 - type: "income" atau "expense"
-- amount: number (tanpa simbol mata uang)
-- description: string (dalam bahasa Indonesia, tanpa kata-kata seperti "habis", "beli", "bayar")
+- amount: number (tanpa simbol mata uang, PASTIKAN KONVERSI BENAR)
+- description: string (dalam bahasa Indonesia, bersih tanpa kata kerja)
 - category: string (kategori yang sesuai dalam bahasa Indonesia, atau "unknown" jika tidak yakin)
 - confidence: number (0-1, seberapa yakin dalam parsing)
+- amountDetails: string (jelaskan konversi amount untuk verifikasi)
 
-Contoh:
-"Saya habis 50000 untuk makan siang hari ini" -> {"type":"expense","amount":50000,"description":"makan siang hari ini","category":"Makanan","confidence":0.9}
-"Terima 500000 dari bayaran klien" -> {"type":"income","amount":500000,"description":"bayaran klien","category":"Freelance","confidence":0.9}
-"Beli bensin 100000" -> {"type":"expense","amount":100000,"description":"bensin","category":"Transportasi","confidence":0.9}
-"Habis jajan sate ayam 10000" -> {"type":"expense","amount":10000,"description":"jajan sate ayam","category":"Makanan","confidence":0.9}
+Contoh BENAR:
+"Saya habis 50K untuk makan siang" -> {"type":"expense","amount":50000,"description":"makan siang","category":"Makanan","confidence":0.9,"amountDetails":"50K = 50.000"}
+"Terima 500rb dari bayaran klien" -> {"type":"income","amount":500000,"description":"bayaran klien","category":"Freelance","confidence":0.9,"amountDetails":"500rb = 500.000"}
+"Beli bensin 100K" -> {"type":"expense","amount":100000,"description":"bensin","category":"Transportasi","confidence":0.9,"amountDetails":"100K = 100.000"}
+"Habis jajan 10K" -> {"type":"expense","amount":10000,"description":"jajan","category":"Makanan","confidence":0.9,"amountDetails":"10K = 10.000"}
+"Dapat uang 1.5jt" -> {"type":"income","amount":1500000,"description":"dapat uang","category":"Pemasukan Lain","confidence":0.8,"amountDetails":"1.5jt = 1.500.000"}
 
-Untuk description, hindari kata-kata seperti "habis", "beli", "bayar", "sudah", "spent", "bought", "paid".
-Jika tidak yakin dengan kategori, gunakan "unknown".
+Untuk description, hapus kata kerja seperti "habis", "beli", "bayar", "dapat", "terima", "spent", "bought", "paid".
+Fokus pada objek/item/layanan yang dibeli/diterima.
 
 Input pengguna: "${text}"`;
 
@@ -268,6 +450,22 @@ Input pengguna: "${text}"`;
             // Try to parse JSON response
             const cleanResponse = response.replace(/```json\s*|\s*```/g, '').trim();
             const parsedResult = JSON.parse(cleanResponse);
+            
+            // Validate amount using AmountParser
+            if (parsedResult.amount) {
+                const validation = this.amountParser.validateAmount(parsedResult.amount, 'transaction');
+                if (!validation.valid) {
+                    this.logger.warn(`AI parsed amount validation failed: ${validation.reason}. Amount: ${parsedResult.amount}`);
+                    // Try to re-parse amount from original text
+                    const amountParseResult = this.amountParser.parseAmount(text);
+                    if (amountParseResult.success && amountParseResult.confidence >= 0.7) {
+                        this.logger.info(`Using AmountParser fallback: ${amountParseResult.amount} (${amountParseResult.details})`);
+                        parsedResult.amount = amountParseResult.amount;
+                        parsedResult.amountDetails = amountParseResult.details;
+                        parsedResult.confidence = Math.min(parsedResult.confidence || 0.8, amountParseResult.confidence);
+                    }
+                }
+            }
             
             // Apply title case formatting to description if indonesianAI is provided
             if (indonesianAI && parsedResult.description) {
@@ -317,37 +515,64 @@ Transaksi: ${type === 'income' ? 'pemasukan' : 'pengeluaran'} sebesar ${amount} 
     async generateFinancialAnalysis(financialData) {
         const { balance, transactions, monthlyTrends, categories } = financialData;
 
-        const systemPrompt = `Kamu adalah AI penasihat keuangan. Analisis data keuangan yang diberikan dan berikan wawasan, rekomendasi, dan observasi dalam bahasa Indonesia.
+        const systemPrompt = `Kamu adalah AI penasihat keuangan personal yang sangat ahli dan berpengalaman. Analisis data keuangan dengan mendalam dan berikan wawasan yang actionable dalam bahasa Indonesia.
 
-Fokus pada:
-1. Pola dan tren pengeluaran
-2. Keseimbangan pemasukan vs pengeluaran
-3. Analisis per kategori
-4. Rekomendasi untuk perbaikan
-5. Penilaian kesehatan keuangan
+Sebagai AI Financial Advisor yang ahli, lakukan analisis mendalam pada:
 
-Berikan respons yang ringkas namun mendalam. Gunakan format Rupiah Indonesia (IDR) untuk referensi mata uang. Format respons dengan jelas dan terstruktur dengan emoji untuk keterbacaan yang lebih baik.`;
+📊 ANALISIS UTAMA:
+1. Kesehatan keuangan secara keseluruhan (skor 1-10)
+2. Pola dan tren pengeluaran (identifikasi anomali dan pola berulang)
+3. Rasio pemasukan vs pengeluaran dan stabilitas cash flow
+4. Analisis per kategori dengan identifikasi kategori yang bermasalah
+5. Prediksi keuangan jangka pendek (1-3 bulan)
+6. Risk assessment dan early warning signs
 
-        const userPrompt = `Ringkasan Keuangan:
-- Saldo Saat Ini: ${balance.balance}
-- Total Pemasukan: ${balance.income}
-- Total Pengeluaran: ${balance.expenses}
-- Transaksi Terbaru: ${transactions.length}
+🎯 REKOMENDASI SPESIFIK:
+1. Action items yang dapat ditindaklanjuti segera
+2. Target penghematan realistis dengan timeline
+3. Strategi optimasi untuk setiap kategori bermasalah
+4. Tips praktis sesuai kondisi keuangan user
+5. Emergency fund planning
+6. Investment readiness assessment
 
-Tren Bulanan: ${JSON.stringify(monthlyTrends)}
-Kategori Teratas: ${JSON.stringify(categories)}
+📈 FORMAT RESPONS:
+- Gunakan emoji untuk visual appeal
+- Struktur dengan heading yang jelas
+- Berikan angka spesifik dan persentase
+- Sertakan timeline yang realistic
+- Tone yang encouraging namun honest
+- Gunakan format Rupiah Indonesia (IDR)`;
 
-Mohon berikan analisis keuangan yang komprehensif dan rekomendasi.`;
+        const userPrompt = `DATA KEUANGAN USER:
+💰 Saldo Saat Ini: Rp ${balance.balance?.toLocaleString('id-ID') || 0}
+📈 Total Pemasukan: Rp ${balance.income?.toLocaleString('id-ID') || 0}
+📉 Total Pengeluaran: Rp ${balance.expenses?.toLocaleString('id-ID') || 0}
+📋 Jumlah Transaksi: ${transactions.length}
+⚖️ Net Cash Flow: Rp ${((balance.income || 0) - (balance.expenses || 0)).toLocaleString('id-ID')}
+
+📊 Tren Bulanan:
+${monthlyTrends ? JSON.stringify(monthlyTrends, null, 2) : 'Data tidak tersedia'}
+
+🏷️ Breakdown Kategori:
+${categories ? JSON.stringify(categories, null, 2) : 'Data tidak tersedia'}
+
+Berikan analisis komprehensif dengan rekomendasi spesifik dan actionable untuk memperbaiki kondisi keuangan user.`;
 
         try {
-            const response = await this.makeRequest([
+            const response = await this.makeRequestWithFallback([
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt }
-            ], 0.7, 1500);
+            ], this.generateFallbackFinancialAnalysis.bind(this), userPrompt, 0.7, 1500);
 
             return response;
         } catch (error) {
             this.logger.error('Error generating financial analysis:', error);
+            
+            // If all providers are rate limited, use fallback
+            if (error.message === 'RATE_LIMITED' || error.message === 'RATE_LIMITED_ALL_PROVIDERS') {
+                return this.generateFallbackFinancialAnalysis(userPrompt);
+            }
+            
             return 'Maaf, saya tidak dapat membuat analisis keuangan saat ini. Silakan coba lagi nanti.';
         }
     }
@@ -384,26 +609,74 @@ Berikan respons yang ringkas namun berharga.`;
     }
 
     async predictCashFlow(transactionHistory, timeframe = 'month') {
-        const systemPrompt = `Kamu adalah AI peramal keuangan. Berdasarkan riwayat transaksi, prediksi pola arus kas masa depan dalam bahasa Indonesia.
+        const systemPrompt = `Kamu adalah AI Data Scientist keuangan yang ahli dalam prediksi cash flow. Analisis pola historis dan buat prediksi akurat untuk ${timeframe} berikutnya dalam bahasa Indonesia.
 
-Analisis data dan berikan:
-1. Prediksi pemasukan untuk ${timeframe} berikutnya
-2. Prediksi pengeluaran untuk ${timeframe} berikutnya
-3. Perkiraan perubahan saldo
-4. Tingkat kepercayaan dalam prediksi
-5. Faktor-faktor kunci yang mempengaruhi perkiraan
+ANALISIS YANG HARUS DILAKUKAN:
+🔍 PATTERN RECOGNITION:
+1. Identifikasi pola musiman dan cyclical trends
+2. Deteksi transaksi rutin vs one-time expenses
+3. Analisis volatilitas income dan expenses
+4. Identifikasi growth trends atau declining patterns
 
-Format respons dengan jelas dengan angka spesifik dan alasan.`;
+📊 STATISTICAL ANALYSIS:
+1. Calculate moving averages untuk income/expenses
+2. Identify outliers dan anomalies
+3. Seasonal adjustment factors
+4. Variance analysis dan standard deviation
 
-        const historyText = transactionHistory.map(t => 
-            `${t.date}: ${t.type} ${t.amount} (${t.description})`
-        ).join('\n');
+🎯 PREDICTION MODEL:
+1. Prediksi pemasukan ${timeframe} depan dengan confidence interval
+2. Prediksi pengeluaran ${timeframe} depan dengan breakdown kategori
+3. Net cash flow prediction dengan scenario analysis (best/worst/realistic case)
+4. Probability assessment untuk different outcomes
+5. Risk factors dan mitigation strategies
+
+📈 ADVANCED INSIGHTS:
+1. Early warning indicators
+2. Trend acceleration/deceleration signals
+3. Seasonal adjustment recommendations
+4. Cash flow optimization opportunities
+
+Format respons dengan:
+- Angka spesifik dengan confidence level
+- Visual indicators (emoji/symbols)
+- Actionable recommendations
+- Risk assessment matrix
+- Timeline yang jelas`;
+
+        // Enhanced transaction history formatting with more context
+        const historyText = transactionHistory.map((t, index) => {
+            const date = new Date(t.date).toLocaleDateString('id-ID');
+            const amount = typeof t.amount === 'number' ? t.amount.toLocaleString('id-ID') : t.amount;
+            return `${index + 1}. [${date}] ${t.type.toUpperCase()}: Rp ${amount} - ${t.description} ${t.category ? `(${t.category})` : ''}`;
+        }).join('\n');
+
+        // Add statistical summary for better context
+        const totalTransactions = transactionHistory.length;
+        const incomeTransactions = transactionHistory.filter(t => t.type === 'income');
+        const expenseTransactions = transactionHistory.filter(t => t.type === 'expense');
+        
+        const totalIncome = incomeTransactions.reduce((sum, t) => sum + (typeof t.amount === 'number' ? t.amount : 0), 0);
+        const totalExpenses = expenseTransactions.reduce((sum, t) => sum + (typeof t.amount === 'number' ? t.amount : 0), 0);
+        const avgIncome = incomeTransactions.length > 0 ? totalIncome / incomeTransactions.length : 0;
+        const avgExpense = expenseTransactions.length > 0 ? totalExpenses / expenseTransactions.length : 0;
+
+        const statisticalSummary = `
+📊 STATISTICAL SUMMARY:
+- Total Transaksi: ${totalTransactions}
+- Transaksi Income: ${incomeTransactions.length}
+- Transaksi Expense: ${expenseTransactions.length}
+- Total Income: Rp ${totalIncome.toLocaleString('id-ID')}
+- Total Expenses: Rp ${totalExpenses.toLocaleString('id-ID')}
+- Rata-rata Income: Rp ${avgIncome.toLocaleString('id-ID')}
+- Rata-rata Expense: Rp ${avgExpense.toLocaleString('id-ID')}
+- Net Cash Flow: Rp ${(totalIncome - totalExpenses).toLocaleString('id-ID')}`;
 
         try {
             const response = await this.makeRequest([
                 { role: 'system', content: systemPrompt },
-                { role: 'user', content: `Transaction History:\n${historyText}\n\nPredict cash flow for next ${timeframe}:` }
-            ], 0.6, 1200);
+                { role: 'user', content: `${statisticalSummary}\n\n📋 TRANSACTION HISTORY:\n${historyText}\n\n🔮 TASK: Buat prediksi cash flow yang akurat dan komprehensif untuk ${timeframe} berikutnya berdasarkan data historis di atas.` }
+            ], 0.6, 1500);
 
             return response;
         } catch (error) {
@@ -648,29 +921,68 @@ Format respons dengan bullet points yang jelas dan praktis.`;
     }
 
     async generateFinancialPrediction(historicalTransactions, balance, patterns) {
-        const systemPrompt = `Kamu adalah AI peramal keuangan yang ahli. Berdasarkan data historis transaksi, buatlah prediksi keuangan yang akurat untuk 30 hari ke depan dalam bahasa Indonesia.
+        const systemPrompt = `Kamu adalah AI Financial Forecasting Specialist yang menggunakan advanced analytics untuk prediksi keuangan. Buat prediksi yang akurat dan actionable untuk 30 hari ke depan dalam bahasa Indonesia.
 
-Data historis (60 hari terakhir):
-- Total transaksi: ${historicalTransactions.length}
-- Saldo saat ini: ${balance.balance}
+METODOLOGI PREDIKSI:
+🧮 QUANTITATIVE ANALYSIS:
+1. Time series analysis dengan trend decomposition
+2. Moving averages dan exponential smoothing
+3. Seasonal pattern recognition
+4. Volatility analysis dan confidence intervals
+5. Monte Carlo simulation untuk scenario planning
 
-Pola yang teridentifikasi:
-${JSON.stringify(patterns, null, 2)}
+📊 MACHINE LEARNING INSIGHTS:
+1. Pattern recognition untuk recurring transactions
+2. Anomaly detection untuk unusual spending
+3. Correlation analysis antar kategori
+4. Behavioral pattern modeling
+5. Risk assessment dengan probability scoring
 
-Berikan prediksi yang mencakup:
-1. Estimasi pemasukan dan pengeluaran bulan depan
-2. Perkiraan saldo akhir bulan
-3. Tren kategori pengeluaran yang akan meningkat/menurun
-4. Rekomendasi berdasarkan prediksi
-5. Level akurasi prediksi dan faktor ketidakpastian
+🎯 PREDICTION FRAMEWORK:
+- Base Case (50% probability): Most likely scenario
+- Optimistic Case (25% probability): Best case scenario
+- Pessimistic Case (25% probability): Worst case scenario
+- Black Swan Events: Low probability, high impact risks
 
-Format dengan struktur yang jelas dan angka spesifik.`;
+DATA HISTORIS (60 hari terakhir):
+- Total Transaksi: ${historicalTransactions.length}
+- Saldo Saat Ini: Rp ${balance.balance?.toLocaleString('id-ID') || 0}
+- Periode Analisis: ${historicalTransactions.length > 0 ?
+    `${new Date(Math.min(...historicalTransactions.map(t => new Date(t.date)))).toLocaleDateString('id-ID')} - ${new Date(Math.max(...historicalTransactions.map(t => new Date(t.date)))).toLocaleDateString('id-ID')}` :
+    'Data tidak tersedia'}
+
+POLA YANG TERIDENTIFIKASI:
+${patterns ? JSON.stringify(patterns, null, 2) : 'Analisis pola sedang diproses...'}
+
+DELIVERABLES YANG DIHARAPKAN:
+📈 PREDIKSI KEUANGAN 30 HARI:
+1. Income prediction dengan confidence interval (min-max range)
+2. Expense breakdown per kategori dengan trend analysis
+3. Net cash flow scenarios (base/optimistic/pessimistic)
+4. Saldo projection dengan risk assessment
+5. Liquidity analysis dan cash burn rate
+
+🚨 RISK ASSESSMENT:
+1. Cash flow stress testing
+2. Early warning indicators
+3. Probability of cash shortfall
+4. Emergency fund adequacy analysis
+5. Financial stability score (1-10)
+
+💡 STRATEGIC RECOMMENDATIONS:
+1. Immediate actions (0-7 hari)
+2. Short-term optimizations (1-2 minggu)
+3. Medium-term strategies (3-4 minggu)
+4. Contingency planning untuk different scenarios
+5. KPIs untuk monitoring prediksi accuracy
+
+Format dengan struktur yang jelas, angka spesifik, confidence levels, dan timeline yang actionable.`;
 
         try {
             const response = await this.makeRequest([
                 { role: 'system', content: systemPrompt },
-                { role: 'user', content: 'Buatlah prediksi keuangan untuk 30 hari ke depan.' }
-            ], 0.6, 1500);
+                { role: 'user', content: 'Buatlah prediksi keuangan komprehensif untuk 30 hari ke depan berdasarkan data historis yang telah disediakan.' }
+            ], 0.6, 1800);
 
             return response;
         } catch (error) {
@@ -769,21 +1081,31 @@ Jenis: ${type === 'income' ? 'Pemasukan' : 'Pengeluaran'}`;
     }
 
     async parseBulkTransactions(text, userPhone, indonesianAI = null) {
-        const systemPrompt = `Kamu adalah parser transaksi keuangan bulk untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak multiple transaksi sekaligus.
+        const systemPrompt = `Kamu adalah parser transaksi keuangan bulk yang ahli untuk pengguna Indonesia. Analisis input dalam bahasa Indonesia dan ekstrak multiple transaksi dengan akurat.
+
+RULES PARSING AMOUNT (SANGAT PENTING):
+- "10K" = 10.000, "33k" = 33.000, "150K" = 150.000
+- "1jt" = 1.000.000, "1.5jt" = 1.500.000
+- "25rb" = 25.000, "500ribu" = 500.000
+- "2k" = 2.000, "20k" = 20.000, "30k" = 30.000
+- Angka tanpa suffix: gunakan nilai asli
+
+JANGAN MENGALIKAN AMOUNT YANG SUDAH BENAR!
 
 Kembalikan HANYA objek JSON dengan format:
 {
   "transactions": [
     {
       "type": "income" atau "expense",
-      "amount": number (tanpa simbol mata uang),
-      "description": string (dalam bahasa Indonesia),
-      "category": string (kategori yang sesuai dalam bahasa Indonesia, atau "unknown" jika tidak yakin),
-      "confidence": number (0-1, seberapa yakin dalam parsing)
+      "amount": number (PASTIKAN KONVERSI BENAR),
+      "description": string (bersih tanpa kata kerja),
+      "category": string (kategori yang sesuai),
+      "confidence": number (0-1),
+      "amountDetails": string (jelaskan konversi)
     }
   ],
   "totalTransactions": number,
-  "overallConfidence": number (0-1, rata-rata confidence semua transaksi)
+  "overallConfidence": number (0-1, rata-rata confidence)
 }
 
 Contoh input:
@@ -796,11 +1118,11 @@ Permen 2k"
 Hasil yang diharapkan:
 {
   "transactions": [
-    {"type":"expense","amount":33000,"description":"baju albi","category":"Belanja","confidence":0.9},
-    {"type":"expense","amount":30000,"description":"mainan albi","category":"Belanja","confidence":0.8},
-    {"type":"expense","amount":20000,"description":"galon kopi","category":"Makanan","confidence":0.9},
-    {"type":"expense","amount":2000,"description":"parkir","category":"Transportasi","confidence":0.9},
-    {"type":"expense","amount":2000,"description":"permen","category":"Makanan","confidence":0.9}
+    {"type":"expense","amount":33000,"description":"baju albi","category":"Belanja","confidence":0.9,"amountDetails":"33k = 33.000"},
+    {"type":"expense","amount":30000,"description":"mainan albi","category":"Belanja","confidence":0.8,"amountDetails":"30k = 30.000"},
+    {"type":"expense","amount":20000,"description":"galon kopi","category":"Makanan","confidence":0.9,"amountDetails":"20k = 20.000"},
+    {"type":"expense","amount":2000,"description":"parkir","category":"Transportasi","confidence":0.9,"amountDetails":"2k = 2.000"},
+    {"type":"expense","amount":2000,"description":"permen","category":"Makanan","confidence":0.9,"amountDetails":"2k = 2.000"}
   ],
   "totalTransactions": 5,
   "overallConfidence": 0.88
@@ -808,13 +1130,13 @@ Hasil yang diharapkan:
 
 Rules:
 1. Pisahkan berdasarkan line break atau pola yang jelas
-2. Deteksi angka (k=ribu, jt=juta, rb=ribu)
+2. PASTIKAN konversi amount BENAR sesuai rules di atas
 3. Identifikasi jenis transaksi (default expense jika tidak jelas)
 4. Berikan kategori yang tepat untuk setiap transaksi
 5. Minimum confidence 0.6 untuk dianggap valid
-6. Jika ada transaksi yang tidak jelas, set confidence rendah
-7. PENTING: Untuk description, hindari kata-kata seperti "habis", "beli", "belanja", "bayar", "sudah", "spent", "bought", "paid"
-8. Fokus pada objek/item yang dibeli, bukan aksinya
+6. Hapus kata kerja dari description: "habis", "beli", "belanja", "bayar", "sudah", "spent", "bought", "paid"
+7. Fokus pada objek/item yang dibeli, bukan aksinya
+8. Sertakan amountDetails untuk verifikasi konversi
 
 Input pengguna: "${text}"`;
 
@@ -869,6 +1191,216 @@ Input pengguna: "${text}"`;
 
     isAvailable() {
         return this.isEnabled;
+    }
+
+    /**
+     * Generate fallback financial analysis when AI is unavailable
+     */
+    generateFallbackFinancialAnalysis(analysisData) {
+        try {
+            // Parse the analysis data to extract key metrics
+            const lines = analysisData.split('\n');
+            let totalIncome = 0;
+            let totalExpenses = 0;
+            let balance = 0;
+            let transactionCount = 0;
+
+            // Extract basic metrics from the data
+            lines.forEach(line => {
+                if (line.includes('Total Pemasukan:')) {
+                    totalIncome = parseFloat(line.match(/[\d,]+/)?.[0]?.replace(/,/g, '') || 0);
+                }
+                if (line.includes('Total Pengeluaran:')) {
+                    totalExpenses = parseFloat(line.match(/[\d,]+/)?.[0]?.replace(/,/g, '') || 0);
+                }
+                if (line.includes('Saldo Bersih:')) {
+                    balance = parseFloat(line.match(/-?[\d,]+/)?.[0]?.replace(/,/g, '') || 0);
+                }
+                if (line.includes('Total Transaksi:')) {
+                    transactionCount = parseInt(line.match(/\d+/)?.[0] || 0);
+                }
+            });
+
+            // Generate basic analysis
+            const incomeExpenseRatio = totalIncome > 0 ? (totalExpenses / totalIncome * 100).toFixed(1) : 0;
+            const avgDaily = totalExpenses > 0 ? (totalExpenses / 30).toFixed(0) : 0;
+            
+            let healthStatus = '🟢 Sehat';
+            let healthScore = 8;
+            
+            if (balance < 0) {
+                healthStatus = '🔴 Perlu Perhatian';
+                healthScore = 3;
+            } else if (incomeExpenseRatio > 80) {
+                healthStatus = '🟡 Hati-hati';
+                healthScore = 5;
+            }
+
+            return `📊 **ANALISIS KEUANGAN RINGKAS**
+
+🎯 **STATUS KEUANGAN**
+• Status: ${healthStatus}
+• Skor Kesehatan: ${healthScore}/10
+• Rasio Pengeluaran: ${incomeExpenseRatio}% dari pemasukan
+
+💰 **RINGKASAN KEUANGAN**
+• Total Pemasukan: Rp ${totalIncome.toLocaleString('id-ID')}
+• Total Pengeluaran: Rp ${totalExpenses.toLocaleString('id-ID')}
+• Saldo Bersih: Rp ${balance.toLocaleString('id-ID')}
+• Rata-rata Pengeluaran Harian: Rp ${avgDaily.toLocaleString('id-ID')}
+
+📈 **INSIGHTS OTOMATIS**
+${balance > 0 ?
+    '• ✅ Keuangan Anda dalam kondisi positif' :
+    '• ⚠️ Pengeluaran melebihi pemasukan, perlu evaluasi'}
+${incomeExpenseRatio < 70 ?
+    '• ✅ Rasio pengeluaran masih dalam batas aman' :
+    '• ⚠️ Rasio pengeluaran tinggi, pertimbangkan untuk berhemat'}
+• 📊 Total ${transactionCount} transaksi tercatat
+
+💡 **REKOMENDASI CEPAT**
+${balance < 0 ?
+    '• 🚨 Prioritas: Kurangi pengeluaran non-esensial\n• 💼 Cari sumber pemasukan tambahan' :
+    incomeExpenseRatio > 80 ?
+    '• 💰 Sisihkan lebih banyak untuk tabungan\n• 📝 Buat anggaran bulanan yang lebih ketat' :
+    '• ✅ Pertahankan pola keuangan yang baik\n• 📈 Pertimbangkan investasi untuk masa depan'}
+
+⚠️ *Analisis ini menggunakan mode cadangan. Untuk analisis AI yang lebih mendalam, silakan coba lagi nanti.*`;
+
+        } catch (error) {
+            this.logger.error('Error generating fallback analysis:', error);
+            return `📊 **ANALISIS KEUANGAN TIDAK TERSEDIA**
+
+Maaf, sistem analisis sedang mengalami gangguan. Beberapa informasi dasar:
+
+• Layanan AI sedang sibuk atau mengalami rate limit
+• Data keuangan Anda tetap aman dan tersimpan
+• Anda masih dapat mencatat transaksi seperti biasa
+
+💡 **Saran:**
+• Coba analisis keuangan lagi dalam 10-15 menit
+• Gunakan command /saldo untuk melihat ringkasan cepat
+• Gunakan /laporan untuk melihat data transaksi
+
+Terima kasih atas pengertiannya! 🙏`;
+        }
+    }
+
+    /**
+     * Generate fallback cash flow prediction
+     */
+    generateFallbackCashFlowPrediction(historicalTransactions, timeframe) {
+        try {
+            if (!historicalTransactions || historicalTransactions.length === 0) {
+                return `📈 **PREDIKSI ARUS KAS - ${timeframe.toUpperCase()}**
+
+⚠️ Data transaksi tidak mencukupi untuk membuat prediksi.
+
+💡 **Untuk mendapatkan prediksi yang akurat:**
+• Catat minimal 10-15 transaksi
+• Gunakan aplikasi secara konsisten selama 1-2 minggu
+• Pastikan mencatat semua pemasukan dan pengeluaran
+
+Sistem akan memberikan prediksi otomatis setelah data mencukupi.`;
+            }
+
+            // Simple trend analysis
+            const recentTransactions = historicalTransactions.slice(-14); // Last 14 days
+            const avgIncome = recentTransactions.filter(t => t.type === 'income')
+                .reduce((sum, t) => sum + t.amount, 0) / 14;
+            const avgExpense = recentTransactions.filter(t => t.type === 'expense')
+                .reduce((sum, t) => sum + t.amount, 0) / 14;
+
+            const timeframeDays = timeframe === 'mingguan' ? 7 : timeframe === 'bulanan' ? 30 : 14;
+            const projectedIncome = avgIncome * timeframeDays;
+            const projectedExpense = avgExpense * timeframeDays;
+            const projectedNet = projectedIncome - projectedExpense;
+
+            return `📈 **PREDIKSI ARUS KAS - ${timeframe.toUpperCase()}**
+
+📊 **PREDIKSI BERDASARKAN TREN 14 HARI TERAKHIR:**
+
+💰 **PROYEKSI PEMASUKAN**
+• Estimasi: Rp ${projectedIncome.toLocaleString('id-ID')}
+• Rata-rata harian: Rp ${avgIncome.toLocaleString('id-ID')}
+
+💸 **PROYEKSI PENGELUARAN**
+• Estimasi: Rp ${projectedExpense.toLocaleString('id-ID')}
+• Rata-rata harian: Rp ${avgExpense.toLocaleString('id-ID')}
+
+🎯 **NET CASH FLOW**
+• Proyeksi bersih: Rp ${projectedNet.toLocaleString('id-ID')}
+• Status: ${projectedNet > 0 ? '✅ Positif' : '⚠️ Negatif'}
+
+⚠️ *Ini adalah prediksi sederhana. Untuk analisis mendalam dengan AI, coba lagi nanti.*`;
+
+        } catch (error) {
+            this.logger.error('Error generating fallback prediction:', error);
+            return `📈 **PREDIKSI ARUS KAS TIDAK TERSEDIA**
+
+Sistem prediksi sedang mengalami gangguan. Silakan coba lagi dalam beberapa menit.`;
+        }
+    }
+
+    /**
+     * Enhanced error handling for AI requests with fallback
+     */
+    async makeRequestWithFallback(messages, fallbackFunction = null, ...fallbackArgs) {
+        try {
+            return await this.makeRequest(messages);
+        } catch (error) {
+            // Handle rate limit for all providers
+            if (error.message === 'RATE_LIMITED_ALL_PROVIDERS' || this.isRateLimitError(error)) {
+                this.logger.warn('All AI providers rate limited, using fallback response');
+                if (fallbackFunction && typeof fallbackFunction === 'function') {
+                    return fallbackFunction(...fallbackArgs);
+                }
+                throw new Error('RATE_LIMITED');
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Get current provider status for monitoring
+     */
+    getProviderStatus() {
+        const status = {
+            primary: {
+                provider: this.provider,
+                baseURL: this.baseURL,
+                model: this.model,
+                isRateLimited: this.rateLimitedProviders.has(`${this.provider}-primary`),
+                isEnabled: this.isEnabled
+            },
+            fallbacks: this.fallbackProviders.map(p => ({
+                name: p.name,
+                provider: p.provider,
+                baseURL: p.baseURL,
+                model: p.model,
+                isRateLimited: this.rateLimitedProviders.has(p.name),
+                priority: p.priority
+            })),
+            rateLimitedCount: this.rateLimitedProviders.size,
+            lastReset: new Date(this.lastRateLimitReset).toISOString(),
+            availableProviders: this.fallbackProviders.filter(p => !this.rateLimitedProviders.has(p.name)).length
+        };
+
+        return status;
+    }
+
+    /**
+     * Force reset rate limited providers (for admin use)
+     */
+    resetRateLimits() {
+        const previousCount = this.rateLimitedProviders.size;
+        this.rateLimitedProviders.clear();
+        this.lastRateLimitReset = Date.now();
+        this.logger.info(`Manually reset ${previousCount} rate limited providers`);
+        return {
+            resetCount: previousCount,
+            timestamp: new Date().toISOString()
+        };
     }
 }
 

@@ -1,10 +1,12 @@
 const Logger = require('../utils/Logger');
+const AmountParser = require('../utils/AmountParser');
 
 class DebtReceivableService {
     constructor(database, aiService) {
         this.db = database;
         this.ai = aiService;
         this.logger = new Logger();
+        this.amountParser = new AmountParser();
     }
 
     /**
@@ -21,15 +23,25 @@ class DebtReceivableService {
 
             // Prompt khusus untuk parsing hutang piutang dalam bahasa Indonesia
             const prompt = `
-Analisis teks transaksi hutang/piutang dalam bahasa Indonesia berikut dan extract informasi:
+Kamu adalah ahli parser transaksi hutang/piutang untuk pengguna Indonesia. Analisis input dan extract informasi dengan AKURAT.
+
+RULES PARSING AMOUNT (SANGAT PENTING):
+- "10K" = 10.000 (sepuluh ribu)
+- "40K" = 40.000 (empat puluh ribu)
+- "150K" = 150.000 (seratus lima puluh ribu)
+- "1jt" = 1.000.000 (satu juta)
+- "1.5jt" = 1.500.000 (satu setengah juta)
+- "25rb" = 25.000 (dua puluh lima ribu)
+- "500ribu" = 500.000 (lima ratus ribu)
+- Angka tanpa suffix: gunakan nilai asli
 
 Input: "${text}"
 
 Tugas:
 1. Tentukan jenis: HUTANG (user berhutang ke orang) atau PIUTANG (orang berhutang ke user)
-2. Extract nama client/pihak lain
-3. Extract nominal uang (konversi ke angka, contoh: 200K=200000, 1.5juta=1500000)
-4. Extract deskripsi/keterangan transaksi
+2. Extract nama client/pihak lain (bersih, tanpa prefix seperti "pak", "bu")
+3. Extract nominal uang (PASTIKAN KONVERSI BENAR)
+4. Extract deskripsi/keterangan transaksi (tanpa kata kerja)
 5. Berikan confidence score (0.0-1.0)
 
 Pola yang harus dideteksi:
@@ -39,19 +51,23 @@ Pola yang harus dideteksi:
 Format output JSON:
 {
     "type": "HUTANG" atau "PIUTANG",
-    "client_name": "nama client",
+    "client_name": "nama client (bersih)",
     "amount": nominal_dalam_angka,
-    "description": "deskripsi transaksi",
+    "description": "deskripsi transaksi (tanpa kata kerja)",
     "confidence": 0.0-1.0,
-    "parsed_successfully": true/false
+    "parsed_successfully": true/false,
+    "amount_details": "penjelasan konversi amount untuk verifikasi"
 }
 
 Contoh:
 Input: "Piutang Andre beli minyak goreng 40K"
-Output: {"type": "PIUTANG", "client_name": "Andre", "amount": 200000, "description": "beli minyak goreng", "confidence": 0.95, "parsed_successfully": true}
+Output: {"type": "PIUTANG", "client_name": "Andre", "amount": 40000, "description": "minyak goreng", "confidence": 0.95, "parsed_successfully": true, "amount_details": "40K = 40.000"}
 
 Input: "Hutang ke Toko Budi sembako 150K"
-Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "description": "sembako", "confidence": 0.9, "parsed_successfully": true}
+Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "description": "sembako", "confidence": 0.9, "parsed_successfully": true, "amount_details": "150K = 150.000"}
+
+Input: "Piutang Warung Sari bayar mie ayam 25rb"
+Output: {"type": "PIUTANG", "client_name": "Warung Sari", "amount": 25000, "description": "mie ayam", "confidence": 0.9, "parsed_successfully": true, "amount_details": "25rb = 25.000"}
 `;
 
             const aiResponse = await this.ai.makeRequest([
@@ -133,49 +149,27 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                 return { success: false, confidence: 0, error: 'Tidak dapat mendeteksi jenis hutang/piutang' };
             }
             
-            // Extract amount using regex (improved patterns)
-            const amountPatterns = [
-                /(\d+(?:\.\d+)?)\s*juta/i,           // 1.5juta, 2 juta
-                /(\d+(?:\.\d+)?)\s*[kK]/,            // 200K, 150k
-                /(\d+)\s*ribu/i,                     // 200ribu
-                /(\d+)\s*ribuan/i,                   // 2ribuan, 5ribuan
-                /(\d{1,3}(?:[.,]\d{3})*)/            // 150000, 1.500.000, 1,500,000
-            ];
+            // Use the new AmountParser for better accuracy
+            const amountParseResult = this.amountParser.parseAmount(text);
             
-            let amount = 0;
-            let amountFound = false;
-            
-            for (const pattern of amountPatterns) {
-                const match = text.match(pattern);
-                if (match) {
-                    const num = parseFloat(match[1].replace(/[.,]/g, ''));
-                    
-                    if (pattern.source.includes('juta')) {
-                        amount = num * 1000000;
-                    } else if (pattern.source.includes('[kK]')) {
-                        amount = num * 1000;
-                    } else if (pattern.source.includes('ribu')) {
-                        amount = num * 1000;
-                    } else if (pattern.source.includes('ribuan')) {
-                        amount = num * 1000;
-                    } else if (pattern.source.includes('ribun')) {
-                        // Handle "5ribun" = 5000
-                        amount = num * 1000;
-                    } else if (pattern.source.includes('ribu')) {
-                        // Handle "5ribu" = 5000
-                        amount = num * 1000;
-                    } else {
-                        // For plain numbers, assume as is
-                        amount = num;
-                    }
-                    
-                    amountFound = true;
-                    break;
-                }
+            if (!amountParseResult.success || amountParseResult.confidence < 0.6) {
+                return {
+                    success: false,
+                    confidence: 0,
+                    error: 'Tidak dapat mendeteksi nominal: ' + amountParseResult.details
+                };
             }
             
-            if (!amountFound || amount <= 0) {
-                return { success: false, confidence: 0, error: 'Tidak dapat mendeteksi nominal' };
+            const amount = amountParseResult.amount;
+            
+            // Validate amount for debt/receivable context
+            const validation = this.amountParser.validateAmount(amount, 'debt');
+            if (!validation.valid) {
+                return {
+                    success: false,
+                    confidence: 0,
+                    error: 'Nominal tidak valid: ' + validation.reason
+                };
             }
             
             // Extract client name
@@ -193,8 +187,9 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                 
                 // Remove amount first to avoid confusion
                 let textWithoutAmount = text;
-                for (const pattern of amountPatterns) {
-                    textWithoutAmount = textWithoutAmount.replace(pattern, '');
+                if (amountParseResult.parsedFrom) {
+                    const amountRegex = new RegExp(amountParseResult.parsedFrom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                    textWithoutAmount = textWithoutAmount.replace(amountRegex, '');
                 }
                 
                 // Look for name after "piutang"
@@ -248,9 +243,10 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                 description = description.replace(new RegExp(clientName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
             }
             
-            // Remove amount patterns
-            for (const pattern of amountPatterns) {
-                description = description.replace(pattern, '');
+            // Remove the parsed amount text from description
+            if (amountParseResult.parsedFrom) {
+                const amountRegex = new RegExp(amountParseResult.parsedFrom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                description = description.replace(amountRegex, '');
             }
             
             // Clean up extra spaces and trim
@@ -272,8 +268,9 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                 clientName: clientName,
                 amount: amount,
                 description: description,
-                confidence: 0.7, // Lower confidence for manual parsing
-                isManualParsing: true // Flag to indicate this was parsed manually
+                confidence: Math.min(0.7, amountParseResult.confidence), // Use amount parsing confidence but cap at 0.7 for manual parsing
+                isManualParsing: true, // Flag to indicate this was parsed manually
+                amountDetails: amountParseResult.details // Include parsing details
             };
             
         } catch (error) {
