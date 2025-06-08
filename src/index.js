@@ -955,42 +955,21 @@ class WhatsAppFinancialBot {
         const compatibleMessage = {
             from: userJid,
             body: messageText,
-            reply: async (text) => {
+            reply: async (content) => {
                 try {
-                    // Check outgoing message against anti-spam (critical for preventing bans!)
-                    const outgoingCheck = await this.antiSpam.checkMessageAllowed(userPhone, text, true);
-                    if (!outgoingCheck.allowed) {
-                        this.logger.error(`🛡️ Outgoing message blocked for ${userPhone}: ${outgoingCheck.reason}`);
-                        
-                        // If emergency brake or global limit, log critical error
-                        if (outgoingCheck.reason === 'emergency_brake' || outgoingCheck.reason.includes('global')) {
-                            this.logger.error('🚨 CRITICAL: Global rate limit reached, stopping outgoing messages to prevent WhatsApp ban');
+                    // Handle both string and object responses
+                    if (typeof content === 'string') {
+                        return await this.sendTextReply(userJid, userPhone, content, message);
+                    } else if (content && typeof content === 'object') {
+                        if (content.type === 'audio') {
+                            return await this.sendAudioReply(userJid, userPhone, content, message);
+                        } else if (content.type === 'text') {
+                            return await this.sendTextReply(userJid, userPhone, content.content, message);
                         }
-                        
-                        return; // Don't send the message
                     }
-
-                    // Apply natural delay if suggested by anti-spam
-                    if (outgoingCheck.naturalDelay > 0) {
-                        this.logger.debug(`⏳ Applying natural delay: ${outgoingCheck.naturalDelay}ms for ${userPhone}`);
-                        await new Promise(resolve => setTimeout(resolve, outgoingCheck.naturalDelay));
-                    }
-
-                    // Log outgoing message from bot
-                    this.logger.info(`📤 Bot reply to ${userPhone}: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
                     
-                    // Send message with typing indicator for natural feel
-                    if (this.typingManager) {
-                        await this.typingManager.sendWithTyping(userJid, text, {
-                            quoted: message
-                        });
-                    } else {
-                        // Fallback if typing manager not available
-                        await this.sock.sendMessage(userJid, {
-                            text: text,
-                            quoted: message
-                        });
-                    }
+                    // Fallback to text if format is unexpected
+                    await this.sendTextReply(userJid, userPhone, String(content), message);
                 } catch (error) {
                     this.logger.error(`Failed to send reply to ${userPhone}:`, error);
                     throw error;
@@ -1015,6 +994,134 @@ class WhatsAppFinancialBot {
             const errorMsg = '❌ Terjadi kesalahan saat memproses pesan Anda.';
             this.logger.info(`📤 Bot error reply to ${userPhone}: ${errorMsg}`);
             await this.sock.sendMessage(userJid, { text: errorMsg });
+        }
+    }
+
+    /**
+     * Send text reply with anti-spam protection
+     */
+    async sendTextReply(userJid, userPhone, text, originalMessage) {
+        try {
+            // Check outgoing message against anti-spam (critical for preventing bans!)
+            const outgoingCheck = await this.antiSpam.checkMessageAllowed(userPhone, text, true);
+            if (!outgoingCheck.allowed) {
+                this.logger.error(`🛡️ Outgoing message blocked for ${userPhone}: ${outgoingCheck.reason}`);
+                
+                // If emergency brake or global limit, log critical error
+                if (outgoingCheck.reason === 'emergency_brake' || outgoingCheck.reason.includes('global')) {
+                    this.logger.error('🚨 CRITICAL: Global rate limit reached, stopping outgoing messages to prevent WhatsApp ban');
+                }
+                
+                return; // Don't send the message
+            }
+
+            // Apply natural delay if suggested by anti-spam
+            if (outgoingCheck.naturalDelay > 0) {
+                this.logger.debug(`⏳ Applying natural delay: ${outgoingCheck.naturalDelay}ms for ${userPhone}`);
+                await new Promise(resolve => setTimeout(resolve, outgoingCheck.naturalDelay));
+            }
+
+            // Log outgoing message from bot
+            this.logger.info(`📤 Bot reply to ${userPhone}: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
+            
+            // Send message with typing indicator for natural feel
+            if (this.typingManager) {
+                await this.typingManager.sendWithTyping(userJid, text, {
+                    quoted: originalMessage
+                });
+            } else {
+                // Fallback if typing manager not available
+                await this.sock.sendMessage(userJid, {
+                    text: text,
+                    quoted: originalMessage
+                });
+            }
+        } catch (error) {
+            this.logger.error(`Failed to send text reply to ${userPhone}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send audio reply with TTS
+     */
+    async sendAudioReply(userJid, userPhone, audioContent, originalMessage) {
+        const fs = require('fs');
+        
+        try {
+            // Check if audio file exists
+            if (!fs.existsSync(audioContent.audioPath)) {
+                this.logger.warn(`Audio file not found: ${audioContent.audioPath}, falling back to text`);
+                return await this.sendTextReply(userJid, userPhone, audioContent.content, originalMessage);
+            }
+
+            // Check outgoing message against anti-spam
+            const outgoingCheck = await this.antiSpam.checkMessageAllowed(userPhone, audioContent.content, true);
+            if (!outgoingCheck.allowed) {
+                this.logger.error(`🛡️ Outgoing audio blocked for ${userPhone}: ${outgoingCheck.reason}`);
+                
+                // If emergency brake or global limit, log critical error
+                if (outgoingCheck.reason === 'emergency_brake' || outgoingCheck.reason.includes('global')) {
+                    this.logger.error('🚨 CRITICAL: Global rate limit reached, stopping outgoing messages to prevent WhatsApp ban');
+                }
+                
+                return; // Don't send the message
+            }
+
+            // Apply natural delay if suggested by anti-spam
+            if (outgoingCheck.naturalDelay > 0) {
+                this.logger.debug(`⏳ Applying natural delay: ${outgoingCheck.naturalDelay}ms for ${userPhone}`);
+                await new Promise(resolve => setTimeout(resolve, outgoingCheck.naturalDelay));
+            }
+
+            // Log outgoing audio message
+            this.logger.info(`🎵 Bot audio reply to ${userPhone}: ${audioContent.content.substring(0, 100)}${audioContent.content.length > 100 ? '...' : ''}`);
+            
+            // Read audio file
+            const audioBuffer = fs.readFileSync(audioContent.audioPath);
+            
+            // Send audio message
+            await this.sock.sendMessage(userJid, {
+                audio: audioBuffer,
+                mimetype: 'audio/mpeg',
+                ptt: true, // Set as voice note
+                quoted: originalMessage
+            });
+
+            // Send caption as follow-up text (optional)
+            if (audioContent.caption && audioContent.caption !== audioContent.content) {
+                setTimeout(async () => {
+                    await this.sendTextReply(userJid, userPhone, audioContent.caption, originalMessage);
+                }, 1000); // Small delay between audio and text
+            }
+
+            // Clean up audio file after sending
+            setTimeout(() => {
+                try {
+                    if (fs.existsSync(audioContent.audioPath)) {
+                        fs.unlinkSync(audioContent.audioPath);
+                        this.logger.debug(`Cleaned up audio file: ${audioContent.audioPath}`);
+                    }
+                } catch (cleanupError) {
+                    this.logger.warn(`Failed to cleanup audio file: ${cleanupError.message}`);
+                }
+            }, 5000); // Clean up after 5 seconds
+
+        } catch (error) {
+            this.logger.error(`Failed to send audio reply to ${userPhone}:`, error);
+            
+            // Fallback to text if audio sending fails
+            const fallbackText = `${audioContent.content}\n\n_💬 Maaf, pengiriman suara gagal. Berikut respons dalam teks._`;
+            await this.sendTextReply(userJid, userPhone, fallbackText, originalMessage);
+            
+            // Clean up audio file on error
+            try {
+                if (fs.existsSync(audioContent.audioPath)) {
+                    fs.unlinkSync(audioContent.audioPath);
+                }
+            } catch (cleanupError) {
+                this.logger.warn(`Failed to cleanup audio file on error: ${cleanupError.message}`);
+            }
         }
     }
 

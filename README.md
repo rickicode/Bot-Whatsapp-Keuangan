@@ -46,8 +46,10 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 ### 💭 AI Curhat Mode (NEW!)
 - 🤗 **Personal AI Companion** - Separate AI mode for emotional support and conversation
 - 💙 **Empathetic Responses** - AI trained to be a caring, non-judgmental friend
+- 🎵 **Voice Response (TTS)** - AI can respond with voice notes using ElevenLabs API
 - 🔒 **Session Management** - Secure conversation sessions with Redis/PostgreSQL fallback
 - 🎯 **Separate Configuration** - Independent AI provider settings for curhat mode
+- 🗣️ **Text-to-Speech** - Natural Indonesian voice responses when requested
 - 🌟 **Natural Conversation** - Free-flowing chat in Indonesian language
 - 🚪 **Easy Toggle** - Simple `/curhat` to enter, `/quit` to exit back to finance mode
 

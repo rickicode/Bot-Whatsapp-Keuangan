@@ -1,10 +1,12 @@
 const Logger = require('../utils/Logger');
 const axios = require('axios');
+const TTSService = require('./TTSService');
 
 class AICurhatService {
     constructor(sessionManager) {
         this.sessionManager = sessionManager;
         this.logger = new Logger();
+        this.ttsService = new TTSService();
         
         // Initialize AI configuration for curhat mode
         this.initializeAIConfig();
@@ -91,11 +93,13 @@ ${greeting} Sekarang kamu dalam mode curhat. Aku siap jadi teman curhat yang bai
 • Memberikan dukungan emosional
 • Berbagi perspektif yang mungkin membantu
 • Menjadi teman bicara yang tidak menghakimi
+• 🎵 Balas dengan suara (voice note) jika diminta
 
 💬 *Tips:*
 • Ceritakan apa saja yang kamu rasakan
 • Aku akan menjaga privasi percakapan kita
 • Jangan ragu untuk berbagi hal yang membuat kamu senang atau sedih
+• 🔊 Untuk respons dengan suara, katakan: "balas dengan suara" atau "pakai voice"
 
 🚪 *Untuk keluar dari mode curhat:*
 Ketik */quit* atau *selesai*
@@ -186,15 +190,24 @@ Semoga harimu menyenangkan! ✨`;
     async handleCurhatMessage(userPhone, message) {
         try {
             if (!this.isEnabled) {
-                return '❌ Mode curhat sedang tidak tersedia.';
+                return {
+                    type: 'text',
+                    content: '❌ Mode curhat sedang tidak tersedia.'
+                };
             }
 
             // Check if user wants to exit
             const lowerMessage = message.toLowerCase().trim();
             if (lowerMessage === '/quit' || lowerMessage === 'selesai' || lowerMessage === '/keluar') {
                 const exitResult = await this.exitCurhatMode(userPhone);
-                return exitResult.message;
+                return {
+                    type: 'text',
+                    content: exitResult.message
+                };
             }
+
+            // Check if user requests voice response
+            const isVoiceRequested = this.ttsService.isVoiceRequested(message);
 
             // Generate session ID for this conversation
             const sessionId = this.generateSessionId(userPhone);
@@ -212,14 +225,74 @@ Semoga harimu menyenangkan! ✨`;
                 // Save AI response to persistent storage
                 await this.sessionManager.saveCurhatMessage(userPhone, sessionId, 'assistant', aiResponse);
                 
-                return aiResponse;
+                // If voice is requested, try to generate TTS
+                if (isVoiceRequested) {
+                    return await this.handleVoiceResponse(userPhone, aiResponse);
+                } else {
+                    return {
+                        type: 'text',
+                        content: aiResponse
+                    };
+                }
             } else {
-                return '😅 Maaf, aku sedang sedikit bingung. Bisa coba ceritakan lagi?';
+                return {
+                    type: 'text',
+                    content: '😅 Maaf, aku sedang sedikit bingung. Bisa coba ceritakan lagi?'
+                };
             }
 
         } catch (error) {
             this.logger.error('Error handling curhat message:', error);
-            return '❌ Maaf, terjadi kesalahan. Coba ceritakan lagi ya.';
+            return {
+                type: 'text',
+                content: '❌ Maaf, terjadi kesalahan. Coba ceritakan lagi ya.'
+            };
+        }
+    }
+
+    /**
+     * Handle voice response generation
+     * @param {string} userPhone - User phone number
+     * @param {string} textResponse - AI text response
+     * @returns {Promise<Object>} - Response object with type and content
+     */
+    async handleVoiceResponse(userPhone, textResponse) {
+        try {
+            this.logger.info(`Generating voice response for user ${userPhone}`);
+            
+            // Clean up old audio files first
+            await this.ttsService.cleanupOldAudioFiles(30); // Clean files older than 30 minutes
+            
+            // Generate TTS audio
+            const ttsResult = await this.ttsService.textToSpeech(textResponse, userPhone);
+            
+            if (ttsResult.success) {
+                this.logger.info(`TTS generated successfully for user ${userPhone}`);
+                return {
+                    type: 'audio',
+                    content: textResponse,
+                    audioPath: ttsResult.audioPath,
+                    caption: textResponse
+                };
+            } else {
+                // If TTS fails, send text response with error message
+                this.logger.warn(`TTS failed for user ${userPhone}: ${ttsResult.error}`);
+                const fallbackMessage = `${textResponse}\n\n_💬 Maaf, balas dengan suara sedang tidak bisa. Berikut respons dalam teks._`;
+                
+                return {
+                    type: 'text',
+                    content: fallbackMessage
+                };
+            }
+
+        } catch (error) {
+            this.logger.error('Error handling voice response:', error);
+            const fallbackMessage = `${textResponse}\n\n_💬 Maaf, balas dengan suara sedang tidak bisa. Berikut respons dalam teks._`;
+            
+            return {
+                type: 'text',
+                content: fallbackMessage
+            };
         }
     }
 
@@ -362,7 +435,8 @@ Semoga harimu menyenangkan! ✨`;
             enabled: this.isEnabled,
             provider: this.provider,
             model: this.model,
-            hasApiKey: !!this.apiConfig.apiKey
+            hasApiKey: !!this.apiConfig.apiKey,
+            tts: this.ttsService.getStatus()
         };
     }
 }
