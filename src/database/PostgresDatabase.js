@@ -540,6 +540,10 @@ class PostgresDatabase extends BaseDatabase {
                 subscription_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 subscription_end TIMESTAMP,
                 payment_status VARCHAR(20) DEFAULT 'free',
+                is_trial BOOLEAN DEFAULT false,
+                trial_start TIMESTAMP,
+                trial_end TIMESTAMP,
+                trial_expired BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
@@ -705,6 +709,25 @@ class PostgresDatabase extends BaseDatabase {
                 ADD COLUMN IF NOT EXISTS last_reset_date DATE DEFAULT CURRENT_DATE
             `;
             this.logger.info('Added last_reset_date column to user_subscriptions (if not exists)');
+
+            // Add trial-related columns to user_subscriptions if they don't exist
+            await this.sql`
+                ALTER TABLE user_subscriptions
+                ADD COLUMN IF NOT EXISTS is_trial BOOLEAN DEFAULT false
+            `;
+            await this.sql`
+                ALTER TABLE user_subscriptions
+                ADD COLUMN IF NOT EXISTS trial_start TIMESTAMP
+            `;
+            await this.sql`
+                ALTER TABLE user_subscriptions
+                ADD COLUMN IF NOT EXISTS trial_end TIMESTAMP
+            `;
+            await this.sql`
+                ALTER TABLE user_subscriptions
+                ADD COLUMN IF NOT EXISTS trial_expired BOOLEAN DEFAULT false
+            `;
+            this.logger.info('Added trial-related columns to user_subscriptions (if not exists)');
 
             // Add icon column to categories if it doesn't exist
             await this.sql`
@@ -893,6 +916,14 @@ class PostgresDatabase extends BaseDatabase {
                 
                 const defaultPlans = [
                     {
+                        name: 'trial',
+                        display_name: 'Free Trial (30 Hari)',
+                        description: 'Trial gratis selama 30 hari dengan unlimited transaksi',
+                        monthly_transaction_limit: null,
+                        price_monthly: 0,
+                        features: JSON.stringify(['unlimited_transaksi_trial', 'laporan_bulanan', 'saldo_check', 'ai_basic', 'trial_30_days'])
+                    },
+                    {
                         name: 'free',
                         display_name: 'Free Plan',
                         description: 'Plan gratis dengan 50 transaksi per hari',
@@ -939,6 +970,15 @@ class PostgresDatabase extends BaseDatabase {
     // Migration functions
     async migrateFresh() {
         try {
+            this.logger.warn('⚠️  WARNING: Fresh migration will DROP ALL TABLES and recreate them');
+            this.logger.warn('⚠️  This action is IRREVERSIBLE and will DELETE ALL DATA!');
+            
+            // Safety check - only allow in development/staging
+            if (process.env.NODE_ENV === 'production') {
+                this.logger.error('❌ Fresh migration is DISABLED in production for safety');
+                throw new Error('Fresh migration not allowed in production environment');
+            }
+            
             this.logger.info('Starting fresh migration for PostgreSQL - This will DROP ALL TABLES and recreate them');
             
             await this.dropAllTables();
@@ -953,7 +993,14 @@ class PostgresDatabase extends BaseDatabase {
 
     async dropAllTables() {
         try {
-            this.logger.info('Dropping all PostgreSQL tables...');
+            this.logger.warn('🔥 DANGER: Dropping all PostgreSQL tables...');
+            this.logger.warn('🔥 This will PERMANENTLY DELETE ALL DATA!');
+            
+            // Safety check - only allow in development/staging
+            if (process.env.NODE_ENV === 'production') {
+                this.logger.error('❌ Drop all tables is DISABLED in production for safety');
+                throw new Error('Drop all tables not allowed in production environment');
+            }
             
             // Drop tables in order to handle foreign key constraints
             const tables = [
@@ -971,10 +1018,12 @@ class PostgresDatabase extends BaseDatabase {
                 'users'
             ];
 
+            this.logger.warn(`⚠️  About to drop ${tables.length} tables: ${tables.join(', ')}`);
+
             for (const table of tables) {
                 try {
                     await this.sql.unsafe(`DROP TABLE IF EXISTS ${table} CASCADE`);
-                    this.logger.info(`Dropped table: ${table}`);
+                    this.logger.info(`🗑️  Dropped table: ${table}`);
                 } catch (error) {
                     this.logger.warn(`Warning dropping table ${table}:`, error.message);
                 }

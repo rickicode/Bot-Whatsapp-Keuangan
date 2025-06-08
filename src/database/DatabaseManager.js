@@ -375,14 +375,21 @@ class DatabaseManager {
                 [phone, name, email, city, 'Asia/Jakarta']
             );
             
-            // Create default free subscription
-            const freePlan = await this.get('SELECT id FROM subscription_plans WHERE name = $1', ['free']);
-            if (freePlan) {
+            // Create 30-day trial subscription for new users
+            const trialPlan = await this.get('SELECT id FROM subscription_plans WHERE name = $1', ['trial']);
+            if (trialPlan) {
+                const trialStart = new Date();
+                const trialEnd = new Date();
+                trialEnd.setDate(trialEnd.getDate() + 30); // 30 days trial
+                
                 await this.run(
-                    `INSERT INTO user_subscriptions (user_phone, plan_id, status, transaction_count, last_reset_date)
-                     VALUES ($1, $2, $3, 0, CURRENT_DATE)
+                    `INSERT INTO user_subscriptions (
+                        user_phone, plan_id, status, transaction_count, last_reset_date,
+                        is_trial, trial_start, trial_end, trial_expired
+                     )
+                     VALUES ($1, $2, $3, 0, CURRENT_DATE, true, $4, $5, false)
                      ON CONFLICT (user_phone) DO NOTHING`,
-                    [phone, freePlan.id, 'active']
+                    [phone, trialPlan.id, 'active', trialStart.toISOString(), trialEnd.toISOString()]
                 );
             }
             
@@ -449,13 +456,16 @@ class DatabaseManager {
             return { allowed: false, reason: 'Subscription expired', subscription };
         }
         
+        // Check and handle trial expiration
+        await this.checkAndHandleTrialExpiration(phone);
+        
         // Auto-reset daily transaction count if needed
         await this.checkAndResetDailyCount(phone);
         
-        // Get updated subscription after potential reset
+        // Get updated subscription after potential trial check and reset
         const updatedSubscription = await this.getUserSubscription(phone);
         
-        // Premium plan has unlimited transactions
+        // Premium plan or active trial has unlimited transactions
         if (updatedSubscription.monthly_transaction_limit === null) {
             return { allowed: true, subscription: updatedSubscription };
         }
@@ -496,6 +506,113 @@ class DatabaseManager {
     async resetMonthlyTransactionCount(phone) {
         // Now this method resets daily count (renamed but kept for backward compatibility)
         await this.checkAndResetDailyCount(phone);
+    }
+
+    // Trial Management Methods
+    async checkAndHandleTrialExpiration(phone) {
+        const subscription = await this.getUserSubscription(phone);
+        
+        if (!subscription || !subscription.is_trial || subscription.trial_expired) {
+            return; // Not a trial or already handled
+        }
+        
+        const now = new Date();
+        const trialEnd = new Date(subscription.trial_end);
+        
+        if (now > trialEnd) {
+            // Trial has expired, move user to free plan
+            await this.expireTrialAndMoveToFree(phone);
+        }
+    }
+
+    async expireTrialAndMoveToFree(phone) {
+        try {
+            await this.beginTransaction();
+            
+            // Get user info before expiring trial
+            const user = await this.get('SELECT name FROM users WHERE phone = $1', [phone]);
+            const userName = user ? user.name : 'User';
+            
+            // Get free plan
+            const freePlan = await this.get('SELECT id FROM subscription_plans WHERE name = $1', ['free']);
+            if (!freePlan) {
+                throw new Error('Free plan not found');
+            }
+            
+            // Update subscription to free plan
+            await this.run(
+                `UPDATE user_subscriptions
+                 SET plan_id = $1, is_trial = false, trial_expired = true,
+                     transaction_count = 0, last_reset_date = CURRENT_DATE
+                 WHERE user_phone = $2`,
+                [freePlan.id, phone]
+            );
+            
+            await this.commit();
+            this.logger.info(`User ${phone} trial expired, moved to free plan`);
+            
+            // Send trial expiration notification
+            if (this.trialNotificationService) {
+                try {
+                    const result = await this.trialNotificationService.sendTrialExpirationNotification(phone, userName);
+                    this.logger.info(`Trial expiration notification result for ${phone}:`, result);
+                } catch (notificationError) {
+                    // Don't fail the expiration process if notification fails
+                    this.logger.error('Failed to send trial expiration notification:', notificationError);
+                }
+            }
+            
+        } catch (error) {
+            await this.rollback();
+            this.logger.error('Error expiring trial:', error);
+            throw error;
+        }
+    }
+
+    // Set trial notification service (called from main app)
+    setTrialNotificationService(notificationService) {
+        this.trialNotificationService = notificationService;
+        this.logger.info('Trial notification service set for DatabaseManager');
+    }
+
+    async getTrialStatus(phone) {
+        const subscription = await this.getUserSubscription(phone);
+        
+        if (!subscription || !subscription.is_trial) {
+            return { isTrial: false };
+        }
+        
+        const now = new Date();
+        const trialEnd = new Date(subscription.trial_end);
+        const daysRemaining = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+        
+        return {
+            isTrial: true,
+            isExpired: subscription.trial_expired || now > trialEnd,
+            trialEnd: subscription.trial_end,
+            daysRemaining: Math.max(0, daysRemaining)
+        };
+    }
+
+    async extendTrial(phone, additionalDays) {
+        const subscription = await this.getUserSubscription(phone);
+        
+        if (!subscription || !subscription.is_trial) {
+            throw new Error('User is not on trial');
+        }
+        
+        const currentTrialEnd = new Date(subscription.trial_end);
+        const newTrialEnd = new Date(currentTrialEnd);
+        newTrialEnd.setDate(newTrialEnd.getDate() + additionalDays);
+        
+        await this.run(
+            `UPDATE user_subscriptions
+             SET trial_end = $1, trial_expired = false
+             WHERE user_phone = $2`,
+            [newTrialEnd.toISOString(), phone]
+        );
+        
+        this.logger.info(`Extended trial for user ${phone} by ${additionalDays} days`);
     }
 
     async updateLastActivity(phone) {

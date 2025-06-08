@@ -22,6 +22,8 @@ const cors = require('cors');
 const cron = require('node-cron');
 const ReminderService = require('./services/ReminderService');
 const MessagingAPIService = require('./services/MessagingAPIService');
+const TrialSchedulerService = require('./services/TrialSchedulerService');
+const TrialNotificationService = require('./services/TrialNotificationService');
 const fs = require('fs');
 const path = require('path');
 
@@ -35,6 +37,8 @@ class WhatsAppFinancialBot {
         this.reminderService = null;
         this.messagingAPI = null;
         this.typingManager = null;
+        this.trialScheduler = null;
+        this.trialNotificationService = null;
         this.logger = new Logger();
         this.antiSpam = new AntiSpamManager();
         this.app = express();
@@ -94,6 +98,12 @@ class WhatsAppFinancialBot {
                     typing: {
                         initialized: this.typingManager ? true : false
                     },
+                    trialScheduler: {
+                        initialized: this.trialScheduler ? true : false
+                    },
+                    trialNotification: {
+                        initialized: this.trialNotificationService ? true : false
+                    },
                     sessions: {
                         pending: global.pendingTransactions ? global.pendingTransactions.size : 0,
                         edit: global.editSessions ? global.editSessions.size : 0,
@@ -142,6 +152,32 @@ class WhatsAppFinancialBot {
                         health.typing.queuedMessages = typingStats.queuedMessages;
                     } catch (error) {
                         health.typing.error = error.message;
+                    }
+                }
+
+                // Check trial scheduler status
+                if (this.trialScheduler) {
+                    try {
+                        const schedulerHealth = await this.trialScheduler.healthCheck();
+                        health.trialScheduler.status = schedulerHealth.status;
+                        health.trialScheduler.totalJobs = schedulerHealth.totalJobs;
+                        health.trialScheduler.jobsRunning = schedulerHealth.jobsRunning;
+                        health.trialScheduler.lastCheck = schedulerHealth.lastCheck;
+                    } catch (error) {
+                        health.trialScheduler.error = error.message;
+                    }
+                }
+
+                // Check trial notification status
+                if (this.trialNotificationService) {
+                    try {
+                        const notificationStats = this.trialNotificationService.getNotificationStats();
+                        health.trialNotification.socketAvailable = notificationStats.socketAvailable;
+                        health.trialNotification.sentToday = notificationStats.sentToday;
+                        health.trialNotification.sentThisWeek = notificationStats.sentThisWeek;
+                        health.trialNotification.totalRecords = notificationStats.totalRecords;
+                    } catch (error) {
+                        health.trialNotification.error = error.message;
                     }
                 }
 
@@ -266,6 +302,71 @@ class WhatsAppFinancialBot {
                     res.json({ status: 'All typing stopped', timestamp: new Date().toISOString() });
                 } else {
                     res.status(500).json({ error: 'Typing manager not initialized' });
+                }
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Trial scheduler monitoring endpoints
+        this.app.get('/trial-scheduler/stats', (req, res) => {
+            try {
+                const stats = this.trialScheduler ? this.trialScheduler.getSchedulerStatus() : { error: 'Trial scheduler not initialized' };
+                res.json({
+                    status: 'OK',
+                    timestamp: new Date().toISOString(),
+                    stats
+                });
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.post('/trial-scheduler/manual-check', async (req, res) => {
+            try {
+                if (this.trialScheduler) {
+                    const result = await this.trialScheduler.manualTrialCheck();
+                    res.json({
+                        status: 'Manual trial check completed',
+                        result,
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    res.status(500).json({ error: 'Trial scheduler not initialized' });
+                }
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Trial notification monitoring endpoints
+        this.app.get('/trial-notification/stats', (req, res) => {
+            try {
+                const stats = this.trialNotificationService ? this.trialNotificationService.getNotificationStats() : { error: 'Trial notification service not initialized' };
+                res.json({
+                    status: 'OK',
+                    timestamp: new Date().toISOString(),
+                    stats
+                });
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.post('/trial-notification/test/:phone', async (req, res) => {
+            try {
+                const phone = req.params.phone;
+                const userName = req.body.userName || 'Test User';
+                
+                if (this.trialNotificationService) {
+                    const result = await this.trialNotificationService.sendTestNotification(phone, userName);
+                    res.json({
+                        status: 'Test notification processed',
+                        result,
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    res.status(500).json({ error: 'Trial notification service not initialized' });
                 }
             } catch (error) {
                 res.status(500).json({ error: error.message });
@@ -559,6 +660,11 @@ class WhatsAppFinancialBot {
             this.reminderService = new ReminderService(this.db);
             this.logger.info('✅ Reminder Service initialized');
 
+            // Initialize trial scheduler service
+            this.trialScheduler = new TrialSchedulerService(this.db);
+            await this.trialScheduler.initialize();
+            this.logger.info('✅ Trial Scheduler Service initialized');
+
             // Start WhatsApp client with retry mechanism
             await this.initializeWhatsAppWithRetry();
             
@@ -765,6 +871,15 @@ class WhatsAppFinancialBot {
             // Initialize messaging API service after WhatsApp connection is established
             this.messagingAPI = new MessagingAPIService(this.sock, this.antiSpam, this.db);
             this.logger.info('✅ Messaging API Service initialized');
+            
+            // Initialize trial notification service after WhatsApp connection is established
+            this.trialNotificationService = new TrialNotificationService(this.sock);
+            this.logger.info('✅ Trial Notification Service initialized');
+            
+            // Connect trial notification service to database manager
+            if (this.db && this.trialNotificationService) {
+                this.db.setTrialNotificationService(this.trialNotificationService);
+            }
             
             this.setupCronJobs();
             this.setupPeriodicCleanup();
@@ -1011,6 +1126,11 @@ class WhatsAppFinancialBot {
                     this.typingManager.cleanupExpiredTyping();
                 }
 
+                // Clean up trial notification queue
+                if (this.trialNotificationService) {
+                    this.trialNotificationService.cleanupNotificationQueue();
+                }
+
                 if (cleanedCount > 0) {
                     this.logger.info(`🧹 Periodic cleanup: removed ${cleanedCount} expired sessions`);
                 }
@@ -1029,6 +1149,17 @@ class WhatsAppFinancialBot {
             // Stop all typing states
             if (this.typingManager) {
                 await this.typingManager.stopAllTyping();
+            }
+            
+            // Stop trial scheduler
+            if (this.trialScheduler) {
+                await this.trialScheduler.shutdown();
+            }
+            
+            // Cleanup trial notification service
+            if (this.trialNotificationService) {
+                this.trialNotificationService.cleanupNotificationQueue();
+                this.logger.info('✅ Trial notification service cleaned up');
             }
             
             if (this.sock) {

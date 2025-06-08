@@ -239,8 +239,10 @@ class IndonesianAIAssistant {
                 `👤 Nama: ${sessionData.name}\n` +
                 `📧 Email: ${sessionData.email}\n` +
                 `🏙️ Kota: ${city}\n\n` +
-                '💎 *Plan Anda:* Free Plan\n' +
-                '📊 Limit transaksi: 50/hari\n\n' +
+                '🎁 *FREE TRIAL 30 HARI!*\n' +
+                '✨ Unlimited transaksi selama trial\n' +
+                '📊 Akses fitur lengkap\n' +
+                '⏰ Setelah trial berakhir, otomatis ke Free Plan (50 transaksi/hari)\n\n' +
                 `🚀 *Selamat datang di ${process.env.BOT_NAME || 'Bot Keuangan'}!*\n` +
                 'Ketik /menu untuk mulai menggunakan fitur-fitur bot.'
             );
@@ -341,10 +343,20 @@ class IndonesianAIAssistant {
         const adminBadge = isAdmin ? ' 👑' : '';
         const botName = process.env.BOT_NAME || 'Bot Keuangan';
         
+        // Get trial status if applicable
+        const trialStatus = await this.db.getTrialStatus(user.phone);
+        let planInfo = `💎 Plan: ${subscription.display_name}\n`;
+        
+        if (trialStatus.isTrial && !trialStatus.isExpired) {
+            planInfo += `🎁 Trial berakhir dalam: ${trialStatus.daysRemaining} hari\n`;
+        } else if (trialStatus.isTrial && trialStatus.isExpired) {
+            planInfo += `⏰ Trial Anda telah berakhir\n`;
+        }
+        
         await message.reply(
             `${greeting} ${user.name}${adminBadge}! 👋\n\n` +
             `🤖 Saya ${botName}, asisten keuangan Anda\n` +
-            `💎 Plan: ${subscription.display_name}\n` +
+            planInfo +
             `📊 Sisa transaksi hari ini: ${remaining}${subscription.monthly_transaction_limit ? `/${subscription.monthly_transaction_limit}` : ''}\n` +
             (isAdmin ? '👑 Status: Administrator\n' : '') +
             '\nAda yang bisa saya bantu hari ini?'

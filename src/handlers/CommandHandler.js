@@ -104,6 +104,11 @@ class CommandHandler {
             '/user-detail': this.handleUserDetail.bind(this),
             '/ai-info': this.handleAIInfo.bind(this),
             
+            // Trial management
+            '/trial': this.handleTrialStatus.bind(this),
+            '/trial-status': this.handleTrialStatus.bind(this),
+            '/status-trial': this.handleTrialStatus.bind(this),
+            
             // Bulk transaction features
             '/bulk': this.handleBulkTransaction.bind(this),
             '/bulk-transaksi': this.handleBulkTransaction.bind(this)
@@ -3739,6 +3744,58 @@ Permen 2k
         } catch (error) {
             this.logger.error('Error in handleHelp:', error);
             await message.reply('❌ Terjadi kesalahan saat menampilkan bantuan.');
+        }
+    }
+
+    // Trial Status Handler
+    async handleTrialStatus(message, userPhone, args) {
+        try {
+            const trialStatus = await this.db.getTrialStatus(userPhone);
+            const subscription = await this.db.getUserSubscription(userPhone);
+            
+            if (!trialStatus.isTrial) {
+                await message.reply(
+                    '📊 *Status Langganan Anda*\n\n' +
+                    `💎 Plan: ${subscription?.display_name || 'Free Plan'}\n` +
+                    '📝 Anda tidak sedang dalam masa trial.\n\n' +
+                    '💡 Untuk upgrade ke Premium, ketik "upgrade"'
+                );
+                return;
+            }
+            
+            if (trialStatus.isExpired) {
+                await message.reply(
+                    '⏰ *Trial Anda Telah Berakhir*\n\n' +
+                    '🎁 Trial gratis 30 hari Anda sudah habis\n' +
+                    `💎 Sekarang Anda menggunakan: ${subscription?.display_name || 'Free Plan'}\n` +
+                    '📊 Limit transaksi: 50 per hari\n\n' +
+                    '🚀 *Upgrade ke Premium untuk:*\n' +
+                    '• ∞ Unlimited transaksi\n' +
+                    '• 📈 Laporan advanced\n' +
+                    '• 🤖 AI analisis\n' +
+                    '• 📤 Export data\n' +
+                    '• ⚡ Priority support\n\n' +
+                    '💡 Ketik "upgrade" untuk informasi lebih lanjut!'
+                );
+            } else {
+                const trialEndDate = new Date(trialStatus.trialEnd).toLocaleDateString('id-ID');
+                
+                await message.reply(
+                    '🎁 *Status Trial Anda*\n\n' +
+                    '✨ Trial aktif - Unlimited transaksi!\n' +
+                    `⏰ Berakhir dalam: ${trialStatus.daysRemaining} hari\n` +
+                    `📅 Tanggal berakhir: ${trialEndDate}\n\n` +
+                    '🔄 *Setelah trial berakhir:*\n' +
+                    '• Otomatis pindah ke Free Plan\n' +
+                    '• Limit transaksi: 50 per hari\n\n' +
+                    '🚀 *Ingin lanjut unlimited setelah trial?*\n' +
+                    'Ketik "upgrade" untuk info Premium Plan!'
+                );
+            }
+            
+        } catch (error) {
+            this.logger.error('Error in handleTrialStatus:', error);
+            await message.reply('❌ Terjadi kesalahan saat mengecek status trial.');
         }
     }
 }

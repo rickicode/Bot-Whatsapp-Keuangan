@@ -21,6 +21,39 @@ const DatabaseFactory = require('../src/database/DatabaseFactory');
 const Logger = require('../src/utils/Logger');
 
 const logger = new Logger();
+const readline = require('readline');
+
+// Function to ask for user confirmation (3 times for dangerous operations)
+async function askConfirmation(message, times = 3) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    for (let i = 1; i <= times; i++) {
+        const question = `${message} (${i}/${times}) [Type "YES" to confirm]: `;
+        
+        const answer = await new Promise((resolve) => {
+            rl.question(question, (answer) => {
+                resolve(answer.trim());
+            });
+        });
+
+        if (answer !== 'YES') {
+            rl.close();
+            logger.info('❌ Operation cancelled by user');
+            process.exit(0);
+        }
+
+        if (i < times) {
+            logger.warn(`⚠️  Confirmation ${i}/${times} completed. ${times - i} more confirmations required.`);
+        }
+    }
+
+    rl.close();
+    logger.info('✅ All confirmations completed. Proceeding with operation...');
+    return true;
+}
 
 async function dropAllTables(db) {
     logger.info('🗑️  Dropping ALL tables in database...');
@@ -42,6 +75,13 @@ async function dropAllTables(db) {
         }
         
         logger.info(`📋 Found ${existingTables.length} tables: ${existingTables.join(', ')}`);
+        logger.warn('⚠️  These tables and ALL their data will be permanently deleted!');
+        
+        // Final confirmation before actual deletion
+        await askConfirmation(
+            '🔥 FINAL WARNING: Proceed with deleting ALL these tables and data?',
+            1
+        );
         
         // Drop all tables with CASCADE to handle dependencies
         logger.info('🗑️  Dropping all tables with CASCADE...');
@@ -159,6 +199,7 @@ Examples:
             case 'fresh':
                 logger.warn('⚠️  FRESH MIGRATION WILL DROP ALL TABLES AND DATA!');
                 logger.warn('⚠️  This action is IRREVERSIBLE!');
+                logger.warn('⚠️  ALL YOUR DATA WILL BE PERMANENTLY DELETED!');
                 
                 // In production, require confirmation
                 if (process.env.NODE_ENV === 'production') {
@@ -166,6 +207,15 @@ Examples:
                     logger.error('❌ Set NODE_ENV to development or staging to enable fresh migrations');
                     process.exit(1);
                 }
+                
+                // Require 3 confirmations for this dangerous operation
+                logger.warn('🛑 This operation will PERMANENTLY DELETE ALL DATA in the database!');
+                logger.warn('🛑 You will need to confirm this action 3 times to proceed.');
+                
+                await askConfirmation(
+                    '🗑️  Do you really want to DROP ALL TABLES and DELETE ALL DATA?',
+                    3
+                );
                 
                 logger.info('🗑️  Starting fresh migration...');
                 
