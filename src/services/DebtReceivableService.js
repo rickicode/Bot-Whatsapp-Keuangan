@@ -47,8 +47,8 @@ Format output JSON:
 }
 
 Contoh:
-Input: "Piutang Warung Madura Voucher Wifi 2Rebuan 200K"
-Output: {"type": "PIUTANG", "client_name": "Warung Madura", "amount": 200000, "description": "Voucher Wifi 2Rebuan", "confidence": 0.95, "parsed_successfully": true}
+Input: "Piutang Andre beli minyak goreng 40K"
+Output: {"type": "PIUTANG", "client_name": "Andre", "amount": 200000, "description": "beli minyak goreng", "confidence": 0.95, "parsed_successfully": true}
 
 Input: "Hutang ke Toko Budi sembako 150K"
 Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "description": "sembako", "confidence": 0.9, "parsed_successfully": true}
@@ -133,13 +133,13 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                 return { success: false, confidence: 0, error: 'Tidak dapat mendeteksi jenis hutang/piutang' };
             }
             
-            // Extract amount using regex
+            // Extract amount using regex (improved patterns)
             const amountPatterns = [
                 /(\d+(?:\.\d+)?)\s*juta/i,           // 1.5juta, 2 juta
                 /(\d+(?:\.\d+)?)\s*[kK]/,            // 200K, 150k
                 /(\d+)\s*ribu/i,                     // 200ribu
-                /(\d+)\s*rebuan/i,                   // 2rebuan
-                /(\d{1,3}(?:\.\d{3})*)/              // 150000, 1.500.000
+                /(\d+)\s*ribuan/i,                   // 2ribuan, 5ribuan
+                /(\d{1,3}(?:[.,]\d{3})*)/            // 150000, 1.500.000, 1,500,000
             ];
             
             let amount = 0;
@@ -148,7 +148,7 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
             for (const pattern of amountPatterns) {
                 const match = text.match(pattern);
                 if (match) {
-                    const num = parseFloat(match[1].replace(/\./g, ''));
+                    const num = parseFloat(match[1].replace(/[.,]/g, ''));
                     
                     if (pattern.source.includes('juta')) {
                         amount = num * 1000000;
@@ -156,9 +156,16 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                         amount = num * 1000;
                     } else if (pattern.source.includes('ribu')) {
                         amount = num * 1000;
-                    } else if (pattern.source.includes('rebuan')) {
+                    } else if (pattern.source.includes('ribuan')) {
+                        amount = num * 1000;
+                    } else if (pattern.source.includes('ribun')) {
+                        // Handle "5ribun" = 5000
+                        amount = num * 1000;
+                    } else if (pattern.source.includes('ribu')) {
+                        // Handle "5ribu" = 5000
                         amount = num * 1000;
                     } else {
+                        // For plain numbers, assume as is
                         amount = num;
                     }
                     
@@ -181,22 +188,44 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                     clientName = keMatch[1].trim();
                 }
             } else {
-                // For piutang, look for name at the beginning or after "piutang"
-                const piutangMatch = text.match(/piutang\s+([^0-9]+?)(?:\s+|$)/i);
+                // For piutang, more sophisticated name extraction
+                // Pattern: "Piutang [NAME] [description] [amount]"
+                
+                // Remove amount first to avoid confusion
+                let textWithoutAmount = text;
+                for (const pattern of amountPatterns) {
+                    textWithoutAmount = textWithoutAmount.replace(pattern, '');
+                }
+                
+                // Look for name after "piutang"
+                const piutangMatch = textWithoutAmount.match(/piutang\s+([A-Za-z\s]+?)(?:\s+[a-z]|$)/i);
                 if (piutangMatch) {
-                    clientName = piutangMatch[1].trim();
+                    // Extract potential client name - usually first 1-3 words after "piutang"
+                    const potentialName = piutangMatch[1].trim();
+                    const words = potentialName.split(/\s+/);
+                    
+                    // Take first 1-3 words as client name (common pattern: "Warung Madura", "Toko Budi", etc.)
+                    if (words.length >= 2) {
+                        clientName = words.slice(0, 2).join(' '); // Take first 2 words
+                    } else {
+                        clientName = words[0]; // Single word name
+                    }
                 } else {
-                    // Try to get first words that are not keywords
-                    const words = text.split(/\s+/);
+                    // Fallback: Try to get first words that look like names
+                    const words = textWithoutAmount.split(/\s+/);
                     const skipWords = ['piutang', 'hutang', 'belum', 'bayar', 'pinjam'];
+                    let nameWords = [];
+                    
                     for (const word of words) {
-                        if (!skipWords.includes(word.toLowerCase()) && isNaN(parseFloat(word))) {
-                            if (!word.match(/[kK]$|juta|ribu|rebuan/)) {
-                                clientName += word + ' ';
-                            }
+                        if (!skipWords.includes(word.toLowerCase()) &&
+                            isNaN(parseFloat(word)) &&
+                            !word.match(/[kK]$|juta|ribu|ribuan/i) &&
+                            word.length > 1) {
+                            nameWords.push(word);
+                            if (nameWords.length >= 2) break; // Limit to 2 words for name
                         }
                     }
-                    clientName = clientName.trim();
+                    clientName = nameWords.join(' ');
                 }
             }
             
@@ -207,16 +236,35 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
             // Clean client name
             clientName = this.cleanClientName(clientName);
             
-            // Extract description (simple approach)
+            // Extract description (improved approach)
             let description = text;
-            // Remove type keywords and amount
-            description = description.replace(/piutang|hutang|belum bayar|pinjam|ke/gi, '');
-            description = description.replace(/\d+(?:\.\d+)?\s*(?:juta|[kK]|ribu|rebuan)/gi, '');
-            description = description.replace(clientName, '');
-            description = description.trim();
+            
+            // Remove type keywords
+            description = description.replace(/^(piutang|hutang|belum bayar|pinjam)\s*/gi, '');
+            description = description.replace(/\s+(ke)\s+/gi, ' ');
+            
+            // Remove client name from description
+            if (clientName) {
+                description = description.replace(new RegExp(clientName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
+            }
+            
+            // Remove amount patterns
+            for (const pattern of amountPatterns) {
+                description = description.replace(pattern, '');
+            }
+            
+            // Clean up extra spaces and trim
+            description = description.replace(/\s+/g, ' ').trim();
+            
+            // If description is empty or too short, create a default one
+            if (!description || description.length < 3) {
+                description = type === 'PIUTANG' ?
+                    `Piutang dari ${clientName}` :
+                    `Hutang ke ${clientName}`;
+            }
             
             // Clean description
-            description = this.cleanDescription(description || 'Transaksi hutang/piutang');
+            description = this.cleanDescription(description);
             
             return {
                 success: true,
@@ -271,15 +319,16 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
         try {
             await this.db.beginTransaction();
             
-            // 1. Auto register client jika belum ada
+            // 1. Auto register client jika belum ada atau update phone jika ada
             let client = await this.db.get(
                 'SELECT * FROM clients WHERE name = $1 AND user_phone = $2',
                 [clientName, userPhone]
             );
             
             if (!client) {
+                // Create new client
                 const clientId = await this.db.run(
-                    `INSERT INTO clients (user_phone, name, phone, created_at) 
+                    `INSERT INTO clients (user_phone, name, phone, created_at)
                      VALUES ($1, $2, $3, CURRENT_TIMESTAMP) RETURNING id`,
                     [userPhone, clientName, clientPhone]
                 );
@@ -291,7 +340,18 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
                     phone: clientPhone
                 };
                 
-                this.logger.info(`Auto-registered new client: ${clientName} (ID: ${client.id})`);
+                this.logger.info(`Auto-registered new client: ${clientName} (ID: ${client.id}) with phone: ${clientPhone}`);
+            } else {
+                // Update existing client phone if provided and different
+                if (clientPhone && client.phone !== clientPhone) {
+                    await this.db.run(
+                        `UPDATE clients SET phone = $1, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $2`,
+                        [clientPhone, client.id]
+                    );
+                    client.phone = clientPhone;
+                    this.logger.info(`Updated client phone: ${clientName} (ID: ${client.id}) new phone: ${clientPhone}`);
+                }
             }
             
             // 2. Add debt/receivable record
@@ -442,11 +502,29 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
     /**
      * Generate AI response untuk konfirmasi
      */
-    generateConfirmationMessage(parsed, clientName) {
+    async generateConfirmationMessage(parsed, clientName, userPhone) {
         const typeText = parsed.type === 'PIUTANG' ? 'berhutang' : 'Anda berhutang';
         const directionText = parsed.type === 'PIUTANG' ? 'kepada Anda' : `ke ${clientName}`;
         
-        let message = `Baik, jadi ${parsed.type === 'PIUTANG' ? clientName : 'Anda'} ${typeText} ${parsed.description} sebesar Rp ${this.formatCurrency(parsed.amount)} ${directionText}.\n\n📱 Silakan masukkan nomor WhatsApp ${clientName}:\n💡 Format: 08xxxxxxxxxx atau 62xxxxxxxxxx\nAtau ketik "tidak" jika tidak punya nomor HP`;
+        // Check if client already exists and has phone number
+        let existingClient = null;
+        try {
+            existingClient = await this.db.get(
+                'SELECT * FROM clients WHERE name = $1 AND user_phone = $2',
+                [clientName, userPhone]
+            );
+        } catch (error) {
+            this.logger.error('Error checking existing client:', error);
+        }
+        
+        let message = `Baik, jadi ${parsed.type === 'PIUTANG' ? clientName : 'Anda'} ${typeText} ${parsed.description} sebesar Rp ${this.formatCurrency(parsed.amount)} ${directionText}.`;
+        
+        // Only ask for phone number if client doesn't exist or doesn't have phone
+        if (!existingClient || !existingClient.phone) {
+            message += `\n\n📱 Silakan masukkan nomor WhatsApp ${clientName}:\n💡 Format: 08xxxxxxxxxx atau 62xxxxxxxxxx\nAtau ketik "tidak" jika tidak punya nomor HP`;
+        } else {
+            message += `\n\n📱 Client sudah terdaftar dengan nomor: ${existingClient.phone}\n\n✅ Balas dengan "YA" atau "KONFIRMASI" untuk menyimpan transaksi\n❌ Balas dengan "BATAL" untuk membatalkan`;
+        }
         
         // Add note if this was parsed manually (without AI)
         if (parsed.isManualParsing) {
@@ -464,6 +542,161 @@ Output: {"type": "HUTANG", "client_name": "Toko Budi", "amount": 150000, "descri
             minimumFractionDigits: 0,
             maximumFractionDigits: 0
         }).format(amount);
+    }
+
+    /**
+     * Delete debt/receivable record
+     */
+    async deleteDebtReceivable(userPhone, recordId) {
+        try {
+            // First get the record details for confirmation
+            const record = await this.db.get(
+                `SELECT dr.*, c.name as client_name
+                 FROM debt_receivables dr
+                 JOIN clients c ON dr.client_id = c.id
+                 WHERE dr.id = $1 AND dr.user_phone = $2`,
+                [recordId, userPhone]
+            );
+            
+            if (!record) {
+                throw new Error('Record not found or not authorized');
+            }
+            
+            // Delete the record
+            const deleted = await this.db.run(
+                `DELETE FROM debt_receivables
+                 WHERE id = $1 AND user_phone = $2`,
+                [recordId, userPhone]
+            );
+            
+            if (deleted.changes === 0) {
+                throw new Error('Failed to delete record');
+            }
+            
+            return {
+                success: true,
+                deletedRecord: record
+            };
+            
+        } catch (error) {
+            this.logger.error('Error deleting debt/receivable:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Search clients by name
+     */
+    async searchClientsByName(userPhone, searchName) {
+        try {
+            const clients = await this.db.all(
+                `SELECT c.*,
+                        COUNT(dr.id) as total_records,
+                        SUM(CASE WHEN dr.type = 'PIUTANG' AND dr.status = 'active' THEN dr.amount ELSE 0 END) as total_piutang,
+                        SUM(CASE WHEN dr.type = 'HUTANG' AND dr.status = 'active' THEN dr.amount ELSE 0 END) as total_hutang
+                 FROM clients c
+                 LEFT JOIN debt_receivables dr ON c.id = dr.client_id AND dr.status = 'active'
+                 WHERE c.user_phone = $1 AND LOWER(c.name) LIKE LOWER($2)
+                 GROUP BY c.id, c.name, c.phone, c.email, c.address, c.notes, c.created_at, c.updated_at
+                 ORDER BY c.name`,
+                [userPhone, `%${searchName}%`]
+            );
+            
+            return clients;
+            
+        } catch (error) {
+            this.logger.error('Error searching clients:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get client details with all debt/receivable records
+     */
+    async getClientDetails(userPhone, clientName) {
+        try {
+            // Get client info
+            const client = await this.db.get(
+                `SELECT * FROM clients
+                 WHERE user_phone = $1 AND name = $2`,
+                [userPhone, clientName]
+            );
+            
+            if (!client) {
+                throw new Error('Client not found');
+            }
+            
+            // Get all debt/receivable records for this client
+            const records = await this.db.all(
+                `SELECT * FROM debt_receivables
+                 WHERE client_id = $1 AND user_phone = $2
+                 ORDER BY created_at DESC`,
+                [client.id, userPhone]
+            );
+            
+            // Calculate totals
+            const summary = {
+                total_piutang_active: 0,
+                total_hutang_active: 0,
+                total_piutang_paid: 0,
+                total_hutang_paid: 0,
+                total_records: records.length
+            };
+            
+            records.forEach(record => {
+                if (record.status === 'active') {
+                    if (record.type === 'PIUTANG') {
+                        summary.total_piutang_active += parseFloat(record.amount);
+                    } else {
+                        summary.total_hutang_active += parseFloat(record.amount);
+                    }
+                } else if (record.status === 'paid') {
+                    if (record.type === 'PIUTANG') {
+                        summary.total_piutang_paid += parseFloat(record.amount);
+                    } else {
+                        summary.total_hutang_paid += parseFloat(record.amount);
+                    }
+                }
+            });
+            
+            return {
+                client,
+                records,
+                summary
+            };
+            
+        } catch (error) {
+            this.logger.error('Error getting client details:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all clients with debt/receivable summary
+     */
+    async getAllClientsWithSummary(userPhone) {
+        try {
+            const clients = await this.db.all(
+                `SELECT c.*,
+                        COUNT(dr.id) as total_records,
+                        SUM(CASE WHEN dr.type = 'PIUTANG' AND dr.status = 'active' THEN dr.amount ELSE 0 END) as total_piutang,
+                        SUM(CASE WHEN dr.type = 'HUTANG' AND dr.status = 'active' THEN dr.amount ELSE 0 END) as total_hutang,
+                        MAX(dr.created_at) as last_transaction
+                 FROM clients c
+                 LEFT JOIN debt_receivables dr ON c.id = dr.client_id
+                 WHERE c.user_phone = $1
+                 GROUP BY c.id, c.name, c.phone, c.email, c.address, c.notes, c.created_at, c.updated_at
+                 HAVING COUNT(dr.id) > 0
+                 ORDER BY last_transaction DESC`,
+                [userPhone]
+            );
+            
+            return clients;
+            
+        } catch (error) {
+            this.logger.error('Error getting all clients with summary:', error);
+            throw error;
+        }
     }
 }
 

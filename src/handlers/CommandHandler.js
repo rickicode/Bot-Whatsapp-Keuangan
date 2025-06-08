@@ -44,6 +44,14 @@ class CommandHandler {
             '/debt-summary': this.handleDebtReceivableSummary.bind(this),
             '/lunas': this.handleMarkAsPaid.bind(this),
             '/paid': this.handleMarkAsPaid.bind(this),
+            '/hapus-hutang': this.handleDeleteDebtReceivable.bind(this),
+            '/delete-debt': this.handleDeleteDebtReceivable.bind(this),
+            '/cari-client': this.handleSearchClient.bind(this),
+            '/search-client': this.handleSearchClient.bind(this),
+            '/detail-client': this.handleClientDetails.bind(this),
+            '/client-details': this.handleClientDetails.bind(this),
+            '/daftar-client': this.handleClientList.bind(this),
+            '/client-list': this.handleClientList.bind(this),
             
             // Balance and reporting
             '/saldo': this.handleBalance.bind(this),
@@ -937,7 +945,6 @@ Permen 2k
 
 ✅ **Manual Commands:**
 \`\`\`
-/piutang "Warung Madura" 200000 "Voucher Wifi 2Rebuan"
 /hutang "Toko Budi" 150000 "sembako bulanan"
 /hutang-piutang PIUTANG
 /saldo-hutang
@@ -945,7 +952,6 @@ Permen 2k
 \`\`\`
 
 ✅ **Natural Language:**
-• "Piutang Warung Madura Voucher Wifi 2Rebuan 200K"
 • "Hutang ke Toko Budi sembako 150K"
 • "Teman kantor belum bayar makan siang 50K"
 • "Saya pinjam uang ke Pak RT 500K untuk modal"
@@ -3164,22 +3170,33 @@ Permen 2k
             // Parse the debt/receivable input using AI
             const parsed = await this.debtReceivableService.parseDebtReceivableInput(text, userPhone);
             
-            if (!parsed.success || parsed.confidence < 0.6) {
-                // Low confidence, ask for clarification
+            if (!parsed.success || parsed.confidence < 0.4) {
+                // Very low confidence, ask for clarification
                 await message.reply(
                     '🤔 Saya kurang yakin dengan maksud Anda tentang hutang/piutang.\n\n' +
                     '💡 Coba gunakan format yang lebih jelas:\n' +
                     '• Untuk piutang: "Piutang [nama] [keterangan] [nominal]"\n' +
                     '• Untuk hutang: "Hutang ke [nama] [keterangan] [nominal]"\n\n' +
                     'Contoh:\n' +
-                    '• "Piutang Warung Madura Voucher Wifi 2Rebuan 200K"\n' +
+                    '• "Piutang Andri butuh uang 200K"\n' +
                     '• "Hutang ke Toko Budi sembako 150K"'
                 );
                 return true;
             }
 
-            // High confidence, ask for confirmation with phone number
-            const confirmationMessage = this.debtReceivableService.generateConfirmationMessage(parsed, parsed.clientName);
+            // High confidence, check if client exists and generate appropriate message
+            const confirmationMessage = await this.debtReceivableService.generateConfirmationMessage(parsed, parsed.clientName, userPhone);
+            
+            // Check if client already exists with phone
+            let existingClient = null;
+            try {
+                existingClient = await this.db.get(
+                    'SELECT * FROM clients WHERE name = $1 AND user_phone = $2',
+                    [parsed.clientName, userPhone]
+                );
+            } catch (error) {
+                this.logger.error('Error checking existing client:', error);
+            }
             
             // Store pending confirmation
             if (!global.pendingDebtReceivableConfirmations) {
@@ -3188,7 +3205,8 @@ Permen 2k
             
             global.pendingDebtReceivableConfirmations.set(userPhone, {
                 parsed: parsed,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                hasExistingClient: !!(existingClient && existingClient.phone)
             });
 
             await message.reply(confirmationMessage);
@@ -3222,6 +3240,40 @@ Permen 2k
 
             const lowerText = text.toLowerCase().trim();
             
+            // If client already exists, handle confirmation
+            if (pending.hasExistingClient) {
+                // Handle confirmation for existing client
+                if (lowerText === 'ya' || lowerText === 'yes' || lowerText === 'konfirmasi' || lowerText === 'confirm') {
+                    // Get existing client phone
+                    try {
+                        const existingClient = await this.db.get(
+                            'SELECT * FROM clients WHERE name = $1 AND user_phone = $2',
+                            [pending.parsed.clientName, userPhone]
+                        );
+                        await this.processDebtReceivableRecord(message, userPhone, pending.parsed, existingClient.phone);
+                        global.pendingDebtReceivableConfirmations.delete(userPhone);
+                        return true;
+                    } catch (error) {
+                        this.logger.error('Error getting existing client:', error);
+                        await this.processDebtReceivableRecord(message, userPhone, pending.parsed, null);
+                        global.pendingDebtReceivableConfirmations.delete(userPhone);
+                        return true;
+                    }
+                } else if (lowerText === 'batal' || lowerText === 'cancel') {
+                    await message.reply('❌ Transaksi hutang/piutang dibatalkan.');
+                    global.pendingDebtReceivableConfirmations.delete(userPhone);
+                    return true;
+                } else {
+                    await message.reply(
+                        '❓ Pilihan tidak valid!\n\n' +
+                        '✅ Balas dengan "YA" untuk konfirmasi\n' +
+                        '❌ Balas dengan "BATAL" untuk membatalkan'
+                    );
+                    return true;
+                }
+            }
+            
+            // For new clients, handle phone number input
             // Handle "Tidak" case - process without phone number
             if (lowerText === 'tidak' || lowerText === 'no' || lowerText === 'n' || lowerText === 'tidak ada') {
                 await this.processDebtReceivableRecord(message, userPhone, pending.parsed, null);
@@ -3305,7 +3357,7 @@ Permen 2k
             if (clientPhone) {
                 response += `📱 Phone: ${clientPhone}\n`;
             }
-            response += `💰 Jumlah: ${this.debtReceivableService.formatCurrency(parsed.amount)}\n`;
+            response += `💰 Jumlah: Rp ${this.debtReceivableService.formatCurrency(parsed.amount)}\n`;
             response += `📝 Keterangan: ${parsed.description}\n`;
             response += `📋 Status: ${directionText}\n`;
             response += `🆔 ID: ${result.recordId}\n\n`;
@@ -3370,7 +3422,6 @@ Permen 2k
             await message.reply(
                 '📝 Cara pakai: /piutang [nama] [jumlah] [keterangan]\n\n' +
                 'Contoh:\n' +
-                '• /piutang "Warung Madura" 200000 "Voucher Wifi 2Rebuan"\n' +
                 '• /piutang Client 500000 "jasa desain"\n\n' +
                 '💡 Gunakan tanda kutip jika nama mengandung spasi'
             );
@@ -3486,7 +3537,7 @@ Permen 2k
                 response += `📈 *PIUTANG (${piutangRecords.length}):*\n`;
                 piutangRecords.forEach((record, index) => {
                     response += `${index + 1}. ${record.clientName}\n`;
-                    response += `   💰 ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
+                    response += `   💰 Rp ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
                     response += `   📝 ${record.description}\n`;
                     response += `   🆔 ID: ${record.id}\n`;
                     if (record.clientPhone) {
@@ -3500,7 +3551,7 @@ Permen 2k
                 response += `📉 *HUTANG (${hutangRecords.length}):*\n`;
                 hutangRecords.forEach((record, index) => {
                     response += `${index + 1}. ${record.clientName}\n`;
-                    response += `   💰 ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
+                    response += `   💰 Rp ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
                     response += `   📝 ${record.description}\n`;
                     response += `   🆔 ID: ${record.id}\n`;
                     if (record.clientPhone) {
@@ -3528,14 +3579,14 @@ Permen 2k
             const summary = await this.debtReceivableService.getDebtReceivableSummary(userPhone);
             
             let response = `💰 *Ringkasan Hutang Piutang*\n\n`;
-            response += `📈 Total Piutang: ${this.debtReceivableService.formatCurrency(summary.totalPiutang)}\n`;
+            response += `📈 Total Piutang: Rp ${this.debtReceivableService.formatCurrency(summary.totalPiutang)}\n`;
             response += `📊 Jumlah: ${summary.countPiutang} transaksi\n\n`;
-            response += `📉 Total Hutang: ${this.debtReceivableService.formatCurrency(summary.totalHutang)}\n`;
+            response += `📉 Total Hutang: Rp ${this.debtReceivableService.formatCurrency(summary.totalHutang)}\n`;
             response += `📊 Jumlah: ${summary.countHutang} transaksi\n\n`;
             
-            const netBalanceText = summary.netBalance >= 0 ? 
-                `📈 Saldo Bersih: +${this.debtReceivableService.formatCurrency(summary.netBalance)}` :
-                `📉 Saldo Bersih: ${this.debtReceivableService.formatCurrency(summary.netBalance)}`;
+            const netBalanceText = summary.netBalance >= 0 ?
+                `📈 Saldo Bersih: +Rp ${this.debtReceivableService.formatCurrency(summary.netBalance)}` :
+                `📉 Saldo Bersih: -Rp ${this.debtReceivableService.formatCurrency(Math.abs(summary.netBalance))}`;
             
             response += `${netBalanceText}\n\n`;
             response += `💡 *Tips:*\n`;
@@ -3602,6 +3653,287 @@ Permen 2k
     }
 
     /**
+     * Handle delete debt/receivable command
+     */
+    async handleDeleteDebtReceivable(message, userPhone, args) {
+        try {
+            if (args.length === 0) {
+                await message.reply(
+                    '📝 *Cara pakai:* /hapus-hutang [ID]\n\n' +
+                    '🔍 *Contoh:* /hapus-hutang 123\n\n' +
+                    '💡 *Tips:*\n' +
+                    '• Gunakan /hutang-piutang untuk melihat ID\n' +
+                    '• Gunakan /daftar-client untuk melihat semua client'
+                );
+                return;
+            }
+
+            const recordId = parseInt(args[0]);
+            if (isNaN(recordId)) {
+                await message.reply('❌ ID harus berupa angka!\n\nContoh: /hapus-hutang 123');
+                return;
+            }
+
+            // Delete the record
+            const result = await this.debtReceivableService.deleteDebtReceivable(userPhone, recordId);
+            
+            if (result.success) {
+                const record = result.deletedRecord;
+                const typeText = record.type === 'PIUTANG' ? 'Piutang' : 'Hutang';
+                
+                await message.reply(
+                    `✅ *${typeText} berhasil dihapus!*\n\n` +
+                    `🗑️ **Detail yang dihapus:**\n` +
+                    `👤 Client: ${record.client_name}\n` +
+                    `💰 Jumlah: ${this.debtReceivableService.formatCurrency(record.amount)}\n` +
+                    `📝 Deskripsi: ${record.description}\n` +
+                    `📅 Tanggal: ${this.formatDate(record.created_at)}\n\n` +
+                    '📊 Gunakan /saldo-hutang untuk melihat ringkasan terbaru'
+                );
+            }
+
+        } catch (error) {
+            this.logger.error('Error deleting debt/receivable:', error);
+            
+            if (error.message.includes('not found')) {
+                await message.reply('❌ ID tidak ditemukan atau Anda tidak memiliki akses!');
+            } else {
+                await message.reply('❌ Gagal menghapus data: ' + error.message);
+            }
+        }
+    }
+
+    /**
+     * Handle search client command
+     */
+    async handleSearchClient(message, userPhone, args) {
+        try {
+            if (args.length === 0) {
+                await message.reply(
+                    '🔍 *Cara pakai:* /cari-client [nama]\n\n' +
+                    '📝 *Contoh:*\n' +
+                    '• /cari-client Warung\n' +
+                    '• /cari-client Toko Budi\n' +
+                    '• /cari-client Ahmad\n\n' +
+                    '💡 *Tips:* Pencarian tidak case-sensitive dan bisa sebagian nama'
+                );
+                return;
+            }
+
+            const searchName = args.join(' ');
+            const clients = await this.debtReceivableService.searchClientsByName(userPhone, searchName);
+
+            if (clients.length === 0) {
+                await message.reply(
+                    `🔍 *Pencarian Client: "${searchName}"*\n\n` +
+                    '❌ Tidak ada client yang ditemukan.\n\n' +
+                    '💡 *Tips:*\n' +
+                    '• Coba kata kunci yang lebih pendek\n' +
+                    '• Periksa ejaan nama client\n' +
+                    '• Gunakan /daftar-client untuk melihat semua'
+                );
+                return;
+            }
+
+            let response = `🔍 *Hasil Pencarian: "${searchName}"*\n\n`;
+            response += `📋 Ditemukan ${clients.length} client:\n\n`;
+
+            clients.forEach((client, index) => {
+                const totalPiutang = parseFloat(client.total_piutang || 0);
+                const totalHutang = parseFloat(client.total_hutang || 0);
+                const saldoBersih = totalPiutang - totalHutang;
+
+                response += `${index + 1}. **${client.name}**\n`;
+                
+                if (client.phone) {
+                    response += `   📱 ${client.phone}\n`;
+                }
+                
+                if (totalPiutang > 0) {
+                    response += `   📈 Piutang: Rp ${this.debtReceivableService.formatCurrency(totalPiutang)}\n`;
+                }
+                
+                if (totalHutang > 0) {
+                    response += `   📉 Hutang: Rp ${this.debtReceivableService.formatCurrency(totalHutang)}\n`;
+                }
+                
+                if (saldoBersih !== 0) {
+                    const saldoText = saldoBersih > 0 ? 'Saldo Piutang' : 'Saldo Hutang';
+                    const saldoEmoji = saldoBersih > 0 ? '💰' : '💸';
+                    response += `   ${saldoEmoji} ${saldoText}: Rp ${this.debtReceivableService.formatCurrency(Math.abs(saldoBersih))}\n`;
+                }
+                
+                response += `   📊 Total Transaksi: ${client.total_records}\n\n`;
+            });
+
+            response += '💡 *Tips:* Gunakan /detail-client [nama] untuk melihat detail lengkap';
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error searching clients:', error);
+            await message.reply('❌ Gagal mencari client: ' + error.message);
+        }
+    }
+
+    /**
+     * Handle client details command
+     */
+    async handleClientDetails(message, userPhone, args) {
+        try {
+            if (args.length === 0) {
+                await message.reply(
+                    '📋 *Cara pakai:* /detail-client [nama]\n\n' +
+                    '📝 *Contoh:*\n' +
+                    '• /detail-client Warung Madura\n' +
+                    '• /detail-client Toko Budi\n\n' +
+                    '💡 *Tips:* Nama harus persis sama dengan yang terdaftar'
+                );
+                return;
+            }
+
+            const clientName = args.join(' ');
+            const result = await this.debtReceivableService.getClientDetails(userPhone, clientName);
+
+            const { client, records, summary } = result;
+            
+            let response = `📋 *Detail Client: ${client.name}*\n\n`;
+            
+            // Client info
+            response += `👤 **Informasi Client:**\n`;
+            if (client.phone) {
+                response += `📱 Phone: ${client.phone}\n`;
+            }
+            if (client.email) {
+                response += `📧 Email: ${client.email}\n`;
+            }
+            response += `📅 Terdaftar: ${this.formatDate(client.created_at)}\n\n`;
+
+            // Summary
+            response += `💰 **Ringkasan Keuangan:**\n`;
+            if (summary.total_piutang_active > 0) {
+                response += `📈 Piutang Aktif: Rp ${this.debtReceivableService.formatCurrency(summary.total_piutang_active)}\n`;
+            }
+            if (summary.total_hutang_active > 0) {
+                response += `📉 Hutang Aktif: Rp ${this.debtReceivableService.formatCurrency(summary.total_hutang_active)}\n`;
+            }
+            if (summary.total_piutang_paid > 0) {
+                response += `✅ Piutang Lunas: Rp ${this.debtReceivableService.formatCurrency(summary.total_piutang_paid)}\n`;
+            }
+            if (summary.total_hutang_paid > 0) {
+                response += `✅ Hutang Lunas: Rp ${this.debtReceivableService.formatCurrency(summary.total_hutang_paid)}\n`;
+            }
+            
+            const saldoBersih = summary.total_piutang_active - summary.total_hutang_active;
+            if (saldoBersih !== 0) {
+                const saldoText = saldoBersih > 0 ? 'Saldo Piutang' : 'Saldo Hutang';
+                const saldoEmoji = saldoBersih > 0 ? '💰' : '💸';
+                response += `${saldoEmoji} ${saldoText}: Rp ${this.debtReceivableService.formatCurrency(Math.abs(saldoBersih))}\n`;
+            }
+            
+            response += `📊 Total Transaksi: ${summary.total_records}\n\n`;
+
+            // Recent records
+            if (records.length > 0) {
+                response += `📜 **Riwayat Transaksi (5 Terbaru):**\n`;
+                const recentRecords = records.slice(0, 5);
+                
+                recentRecords.forEach((record, index) => {
+                    const typeEmoji = record.type === 'PIUTANG' ? '📈' : '📉';
+                    const statusEmoji = record.status === 'paid' ? '✅' : '🔄';
+                    
+                    response += `${index + 1}. ${typeEmoji} ${record.type} ${statusEmoji}\n`;
+                    response += `   💰 Rp ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
+                    response += `   📝 ${record.description}\n`;
+                    response += `   📅 ${this.formatDate(record.created_at)}\n`;
+                    response += `   🆔 ID: ${record.id}\n\n`;
+                });
+                
+                if (records.length > 5) {
+                    response += `... dan ${records.length - 5} transaksi lainnya\n\n`;
+                }
+            }
+
+            response += '💡 *Tips:*\n';
+            response += '• /hutang-piutang untuk melihat semua transaksi\n';
+            response += '• /lunas [ID] untuk menandai lunas\n';
+            response += '• /hapus-hutang [ID] untuk menghapus transaksi';
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error getting client details:', error);
+            
+            if (error.message.includes('not found')) {
+                await message.reply(`❌ Client "${args.join(' ')}" tidak ditemukan!\n\n💡 Gunakan /cari-client untuk mencari client yang mirip.`);
+            } else {
+                await message.reply('❌ Gagal mengambil detail client: ' + error.message);
+            }
+        }
+    }
+
+    /**
+     * Handle client list command
+     */
+    async handleClientList(message, userPhone, args) {
+        try {
+            const clients = await this.debtReceivableService.getAllClientsWithSummary(userPhone);
+
+            if (clients.length === 0) {
+                await message.reply(
+                    '📋 *Daftar Client*\n\n' +
+                    '❌ Belum ada client yang terdaftar.\n\n' +
+                    '💡 *Tips:* Buat transaksi hutang/piutang pertama untuk menambah client'
+                );
+                return;
+            }
+
+            let response = `📋 *Daftar Semua Client*\n\n`;
+            response += `👥 Total: ${clients.length} client\n\n`;
+
+            clients.forEach((client, index) => {
+                const totalPiutang = parseFloat(client.total_piutang || 0);
+                const totalHutang = parseFloat(client.total_hutang || 0);
+                const saldoBersih = totalPiutang - totalHutang;
+
+                response += `${index + 1}. **${client.name}**\n`;
+                
+                if (client.phone) {
+                    response += `   📱 ${client.phone}\n`;
+                }
+                
+                if (totalPiutang > 0) {
+                    response += `   📈 Piutang: Rp ${this.debtReceivableService.formatCurrency(totalPiutang)}\n`;
+                }
+                
+                if (totalHutang > 0) {
+                    response += `   📉 Hutang: Rp ${this.debtReceivableService.formatCurrency(totalHutang)}\n`;
+                }
+                
+                if (saldoBersih !== 0) {
+                    const saldoText = saldoBersih > 0 ? 'Saldo Piutang' : 'Saldo Hutang';
+                    const saldoEmoji = saldoBersih > 0 ? '💰' : '💸';
+                    response += `   ${saldoEmoji} ${saldoText}: Rp ${this.debtReceivableService.formatCurrency(Math.abs(saldoBersih))}\n`;
+                }
+                
+                response += `   📊 Transaksi: ${client.total_records}\n`;
+                response += `   📅 Terakhir: ${this.formatDate(client.last_transaction)}\n\n`;
+            });
+
+            response += '💡 *Tips:*\n';
+            response += '• /cari-client [nama] untuk mencari client\n';
+            response += '• /detail-client [nama] untuk detail lengkap\n';
+            response += '• /saldo-hutang untuk ringkasan total';
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error getting client list:', error);
+            await message.reply('❌ Gagal mengambil daftar client: ' + error.message);
+        }
+    }
+
+    /**
      * Handle main menu command
      */
     async handleMainMenu(message, userPhone, args) {
@@ -3632,7 +3964,13 @@ Permen 2k
             menuText += `📉 /daftar-hutang - Lihat Anda hutang ke siapa\n`;
             menuText += `📋 /hutang-piutang - Lihat semua hutang & piutang\n`;
             menuText += `💰 /saldo-hutang - Ringkasan saldo hutang-piutang\n`;
-            menuText += `✅ /lunas [ID] - Tandai sebagai lunas\n\n`;
+            menuText += `✅ /lunas [ID] - Tandai sebagai lunas\n`;
+            menuText += `🗑️ /hapus-hutang [ID] - Hapus hutang/piutang\n\n`;
+
+            menuText += `👥 *MANAJEMEN CLIENT:* ⭐ NEW!\n`;
+            menuText += `🔍 /cari-client [nama] - Cari client berdasarkan nama\n`;
+            menuText += `📋 /detail-client [nama] - Detail lengkap client\n`;
+            menuText += `📝 /daftar-client - Lihat semua client\n\n`;
 
             menuText += `🏷️ *KATEGORI:*\n`;
             menuText += `📝 /kategori - Lihat semua kategori\n`;
@@ -3698,7 +4036,13 @@ Permen 2k
             helpText += `📉 /daftar-hutang - Anda hutang ke siapa\n`;
             helpText += `📋 /hutang-piutang - Lihat semua\n`;
             helpText += `💰 /saldo-hutang - Ringkasan total\n`;
-            helpText += `✅ /lunas 123 - Tandai ID 123 lunas\n\n`;
+            helpText += `✅ /lunas 123 - Tandai ID 123 lunas\n`;
+            helpText += `🗑️ /hapus-hutang 123 - Hapus ID 123\n\n`;
+
+            helpText += `👥 *Commands Client Management:* ⭐ NEW!\n`;
+            helpText += `🔍 /cari-client Warung - Cari client "Warung"\n`;
+            helpText += `📋 /detail-client Toko Budi - Detail client lengkap\n`;
+            helpText += `📝 /daftar-client - Semua client dengan summary\n\n`;
 
             helpText += `🗣️ *Input Natural Language:*\n`;
             helpText += `"Piutang Warung Madura 200K voucher wifi"\n`;
