@@ -35,8 +35,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY . .
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/data /app/logs /app/exports && \
-    chmod 755 /app/data /app/logs /app/exports
+RUN mkdir -p /app/data /app/logs /app/exports /app/temp /app/temp/audio && \
+    chmod 755 /app/data /app/logs /app/exports /app/temp /app/temp/audio
 
 # Don't create symlinks to avoid double logging
 # The application will log directly to stdout/stderr
@@ -55,16 +55,50 @@ EXPOSE 3000
 # Add logging configuration
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# TTS Configuration Environment Variables
+ENV ELEVENLABS_TTS_ENABLED=false
+ENV ELEVENLABS_API_KEY=""
+ENV ELEVENLABS_VOICE_ID="pNInz6obpgDQGcFmaJgB"
+ENV ELEVENLABS_BASE_URL="https://api.elevenlabs.io/v1"
+ENV ELEVENLABS_MODEL="eleven_multilingual_v2"
+ENV ELEVENLABS_LANGUAGE_ID="id"
+
+# AI Curhat Configuration
+ENV AI_CURHAT_ENABLED=true
+ENV AI_CURHAT_PROVIDER="openrouter"
+ENV AI_CURHAT_MODEL="deepseek/deepseek-chat-v3-0324:free"
+
+# Add healthcheck with TTS and curhat support
+HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
     CMD node -e "const http = require('http'); \
-    const options = { hostname: 'localhost', port: 3000, path: '/health', timeout: 5000 }; \
+    const options = { hostname: 'localhost', port: 3000, path: '/health', timeout: 10000 }; \
     const req = http.request(options, (res) => { \
-        if (res.statusCode === 200 || res.statusCode === 503) { process.exit(0); } else { process.exit(1); } \
+        let data = ''; \
+        res.on('data', chunk => data += chunk); \
+        res.on('end', () => { \
+            if (res.statusCode === 200) { \
+                try { \
+                    const health = JSON.parse(data); \
+                    if (health.status === 'healthy' || health.status === 'degraded') { \
+                        process.exit(0); \
+                    } else { \
+                        console.error('Health check failed:', health); \
+                        process.exit(1); \
+                    } \
+                } catch (e) { \
+                    console.error('Invalid health response:', data); \
+                    process.exit(1); \
+                } \
+            } else if (res.statusCode === 503) { \
+                process.exit(0); \
+            } else { \
+                process.exit(1); \
+            } \
+        }); \
     }); \
-    req.on('error', () => process.exit(1)); \
-    req.on('timeout', () => process.exit(1)); \
-    req.setTimeout(5000); \
+    req.on('error', (e) => { console.error('Health check error:', e); process.exit(1); }); \
+    req.on('timeout', () => { console.error('Health check timeout'); process.exit(1); }); \
+    req.setTimeout(10000); \
     req.end();"
 
 # Set entrypoint and command
