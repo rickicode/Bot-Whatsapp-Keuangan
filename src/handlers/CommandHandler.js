@@ -2,6 +2,7 @@ const Logger = require('../utils/Logger');
 const TransactionService = require('../services/TransactionService');
 const ReportService = require('../services/ReportService');
 const CategoryService = require('../services/CategoryService');
+const DebtReceivableService = require('../services/DebtReceivableService');
 const moment = require('moment');
 
 class CommandHandler {
@@ -16,6 +17,7 @@ class CommandHandler {
         this.transactionService = new TransactionService(database, aiService);
         this.reportService = new ReportService(database, aiService);
         this.categoryService = new CategoryService(database);
+        this.debtReceivableService = new DebtReceivableService(database, aiService);
         
         // Command mappings
         this.commands = {
@@ -27,7 +29,21 @@ class CommandHandler {
             '/keluar': this.handleExpense.bind(this),
             '/expense': this.handleExpense.bind(this),
             
-            
+            // Debt/Receivable commands
+            '/hutang': this.handleDebt.bind(this),
+            '/debt': this.handleDebt.bind(this),
+            '/piutang': this.handleReceivable.bind(this),
+            '/receivable': this.handleReceivable.bind(this),
+            '/hutang-piutang': this.handleDebtReceivableList.bind(this),
+            '/debt-receivable': this.handleDebtReceivableList.bind(this),
+            '/daftar-hutang': this.handleDebtList.bind(this),
+            '/debt-list': this.handleDebtList.bind(this),
+            '/daftar-piutang': this.handleReceivableList.bind(this),
+            '/receivable-list': this.handleReceivableList.bind(this),
+            '/saldo-hutang': this.handleDebtReceivableSummary.bind(this),
+            '/debt-summary': this.handleDebtReceivableSummary.bind(this),
+            '/lunas': this.handleMarkAsPaid.bind(this),
+            '/paid': this.handleMarkAsPaid.bind(this),
             
             // Balance and reporting
             '/saldo': this.handleBalance.bind(this),
@@ -108,6 +124,11 @@ class CommandHandler {
                 return;
             }
             
+            // Check if user has pending debt/receivable confirmation
+            if (await this.handlePendingDebtReceivableConfirmation(message, userPhone, text)) {
+                return;
+            }
+            
             // Check if user has pending bulk transaction session
             if (await this.handleBulkTransactionSession(message, userPhone, text)) {
                 return;
@@ -156,6 +177,11 @@ class CommandHandler {
         try {
             // Check for auto categorization apply command
             if (await this.handleAutoCategorizationApply(message, userPhone, text)) {
+                return;
+            }
+            
+            // Check for debt/receivable processing first (higher priority)
+            if (await this.handleNaturalLanguageDebtReceivable(message, userPhone, text)) {
                 return;
             }
             
@@ -674,11 +700,20 @@ class CommandHandler {
 ✏️ /edit [id] - Edit transaksi
 🗑️ /hapus [id] - Hapus transaksi
 
+📋 *HUTANG PIUTANG (BARU!):*
+
+📈 /piutang [nama] [jumlah] [keterangan] - Catat piutang
+📉 /hutang [nama] [jumlah] [keterangan] - Catat hutang
+📊 /hutang-piutang - Lihat daftar hutang/piutang
+💰 /saldo-hutang - Ringkasan hutang/piutang
+✅ /lunas [id] - Tandai sebagai lunas
+
 🆘 *BUTUH BANTUAN?*
 Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 
 ✨ *Tips:*
 • Coba ketik dengan bahasa natural seperti "saya habis 50000 untuk makan siang" - AI akan otomatis memproses!
+• Untuk hutang piutang: "Piutang Warung Madura Voucher Wifi 200K" atau "Hutang ke Toko Budi sembako 150K"
 • Untuk multiple transaksi, ketik langsung atau gunakan /bulk`;
 
         await message.reply(menuText);
@@ -724,6 +759,14 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 *Pemasukan:* Gaji, Freelance, Bisnis, Investasi
 *Pengeluaran:* Makanan, Transportasi, Utilitas, Hiburan
 
+📋 *HUTANG PIUTANG:*
+
+• /piutang [nama] [jumlah] [keterangan] - Catat piutang
+• /hutang [nama] [jumlah] [keterangan] - Catat hutang
+• /hutang-piutang [HUTANG/PIUTANG] - Lihat daftar
+• /saldo-hutang - Ringkasan hutang/piutang
+• /lunas [id] - Tandai sebagai lunas
+
 📚 *BANTUAN LANJUTAN:*
 
 🤖 /bantuan-ai - Fitur AI & bahasa natural
@@ -734,7 +777,8 @@ Ketik: "Bagaimana cara..." atau pilih panduan di atas!
 1. Gunakan /saldo untuk lihat ID transaksi
 2. Edit langsung: "edit transaksi 123 ubah jumlah jadi 100000"
 3. Ketik natural: "saya habis 25000 beli kopi"
-4. Bulk natural: AI auto-deteksi multiple transaksi!`;
+4. Hutang piutang natural: "Piutang Warung Madura Voucher Wifi 200K"
+5. Bulk natural: AI auto-deteksi multiple transaksi!`;
 
         await message.reply(helpText);
     }
@@ -883,6 +927,25 @@ Permen 2k
   "Habis belanja baju 33k
    Mainan anak 30k
    Parkir 2k"
+
+📋 *CONTOH HUTANG PIUTANG (BARU!):*
+
+✅ **Manual Commands:**
+\`\`\`
+/piutang "Warung Madura" 200000 "Voucher Wifi 2Rebuan"
+/hutang "Toko Budi" 150000 "sembako bulanan"
+/hutang-piutang PIUTANG
+/saldo-hutang
+/lunas 123
+\`\`\`
+
+✅ **Natural Language:**
+• "Piutang Warung Madura Voucher Wifi 2Rebuan 200K"
+• "Hutang ke Toko Budi sembako 150K"
+• "Teman kantor belum bayar makan siang 50K"
+• "Saya pinjam uang ke Pak RT 500K untuk modal"
+• "Cicilan motor ke Yamaha bulan ini 1.2 juta"
+• "Adik sepupu hutang uang jajan 50K"
 
 🔧 *CONTOH EDIT TRANSAKSI:*
 
@@ -3064,6 +3127,618 @@ Permen 2k
         } catch (error) {
             this.logger.error('Error in handleBulkTransaction:', error);
             await message.reply('❌ Terjadi kesalahan saat memproses bulk transaksi: ' + error.message);
+        }
+    }
+
+    // ===== DEBT/RECEIVABLE HANDLING METHODS =====
+
+    /**
+     * Handle natural language debt/receivable input
+     */
+    async handleNaturalLanguageDebtReceivable(message, userPhone, text) {
+        try {
+            // Check if text contains debt/receivable keywords
+            const debtReceivableKeywords = [
+                'piutang', 'hutang', 'berhutang', 'pinjam', 'belum bayar', 'cicilan',
+                'kredit', 'bayar nanti', 'tempo', 'ngutang', 'utang'
+            ];
+            
+            const hasKeyword = debtReceivableKeywords.some(keyword => 
+                text.toLowerCase().includes(keyword)
+            );
+            
+            if (!hasKeyword) {
+                return false; // Not a debt/receivable transaction
+            }
+
+            // Check if user has pending debt/receivable confirmation
+            if (await this.handlePendingDebtReceivableConfirmation(message, userPhone, text)) {
+                return true;
+            }
+
+            // Parse the debt/receivable input using AI
+            const parsed = await this.debtReceivableService.parseDebtReceivableInput(text, userPhone);
+            
+            if (!parsed.success || parsed.confidence < 0.6) {
+                // Low confidence, ask for clarification
+                await message.reply(
+                    '🤔 Saya kurang yakin dengan maksud Anda tentang hutang/piutang.\n\n' +
+                    '💡 Coba gunakan format yang lebih jelas:\n' +
+                    '• Untuk piutang: "Piutang [nama] [keterangan] [nominal]"\n' +
+                    '• Untuk hutang: "Hutang ke [nama] [keterangan] [nominal]"\n\n' +
+                    'Contoh:\n' +
+                    '• "Piutang Warung Madura Voucher Wifi 2Rebuan 200K"\n' +
+                    '• "Hutang ke Toko Budi sembako 150K"'
+                );
+                return true;
+            }
+
+            // High confidence, ask for confirmation with phone number
+            const confirmationMessage = this.debtReceivableService.generateConfirmationMessage(parsed, parsed.clientName);
+            
+            // Store pending confirmation
+            if (!global.pendingDebtReceivableConfirmations) {
+                global.pendingDebtReceivableConfirmations = new Map();
+            }
+            
+            global.pendingDebtReceivableConfirmations.set(userPhone, {
+                parsed: parsed,
+                timestamp: Date.now()
+            });
+
+            await message.reply(confirmationMessage);
+            return true;
+
+        } catch (error) {
+            this.logger.error('Error in handleNaturalLanguageDebtReceivable:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Handle pending debt/receivable confirmation
+     */
+    async handlePendingDebtReceivableConfirmation(message, userPhone, text) {
+        try {
+            if (!global.pendingDebtReceivableConfirmations) {
+                return false;
+            }
+
+            const pending = global.pendingDebtReceivableConfirmations.get(userPhone);
+            if (!pending) {
+                return false;
+            }
+
+            // Check timeout (5 minutes)
+            if (Date.now() - pending.timestamp > 5 * 60 * 1000) {
+                global.pendingDebtReceivableConfirmations.delete(userPhone);
+                return false;
+            }
+
+            const lowerText = text.toLowerCase().trim();
+            
+            // Handle "Tidak" case - process without phone number
+            if (lowerText === 'tidak' || lowerText === 'no' || lowerText === 'n' || lowerText === 'tidak ada') {
+                await this.processDebtReceivableRecord(message, userPhone, pending.parsed, null);
+                global.pendingDebtReceivableConfirmations.delete(userPhone);
+                return true;
+            }
+
+            // Handle direct phone number input
+            let clientPhone = null;
+            
+            // Try to parse as phone number
+            clientPhone = this.cleanPhoneNumber(text);
+            if (!clientPhone) {
+                await message.reply(
+                    '❌ Format nomor tidak valid!\n\n' +
+                    '💡 Gunakan format: 08xxxxxxxxxx atau 62xxxxxxxxxx\n' +
+                    'Atau ketik "tidak" jika tidak punya nomor HP'
+                );
+                return true;
+            }
+
+            // Process the debt/receivable record
+            await this.processDebtReceivableRecord(message, userPhone, pending.parsed, clientPhone);
+            global.pendingDebtReceivableConfirmations.delete(userPhone);
+            return true;
+
+        } catch (error) {
+            this.logger.error('Error in handlePendingDebtReceivableConfirmation:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Process and save debt/receivable record
+     */
+    async processDebtReceivableRecord(message, userPhone, parsed, clientPhone) {
+        try {
+            // Check transaction limit before processing
+            const limitCheck = await this.db.checkTransactionLimit(userPhone);
+            if (!limitCheck.allowed) {
+                if (limitCheck.reason === 'Daily limit reached') {
+                    await message.reply(
+                        `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                        '⏰ Kuota akan direset besok pagi.\n' +
+                        '💎 Upgrade ke Premium untuk unlimited transaksi.\n' +
+                        "Ketik 'upgrade' untuk info lebih lanjut!"
+                    );
+                } else {
+                    await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+                }
+                return;
+            }
+
+            // Add the debt/receivable record
+            const result = await this.debtReceivableService.addDebtReceivable(
+                userPhone, 
+                parsed.type, 
+                parsed.clientName, 
+                parsed.amount, 
+                parsed.description,
+                clientPhone
+            );
+
+            // Increment transaction count for limited plans
+            if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                await this.db.incrementTransactionCount(userPhone);
+            }
+
+            const remaining = limitCheck.subscription.monthly_transaction_limit
+                ? limitCheck.remaining - 1
+                : '∞';
+
+            // Generate success message
+            const typeText = parsed.type === 'PIUTANG' ? 'Piutang' : 'Hutang';
+            const directionText = parsed.type === 'PIUTANG' ? 
+                `${parsed.clientName} berhutang kepada Anda` : 
+                `Anda berhutang ke ${parsed.clientName}`;
+            
+            let response = `✅ ${typeText} berhasil dicatat!\n\n`;
+            response += `👤 Client: ${parsed.clientName}\n`;
+            if (clientPhone) {
+                response += `📱 Phone: ${clientPhone}\n`;
+            }
+            response += `💰 Jumlah: ${this.debtReceivableService.formatCurrency(parsed.amount)}\n`;
+            response += `📝 Keterangan: ${parsed.description}\n`;
+            response += `📋 Status: ${directionText}\n`;
+            response += `🆔 ID: ${result.recordId}\n\n`;
+            response += `🤖 Tingkat Keyakinan AI: ${Math.round(parsed.confidence * 100)}%\n`;
+            response += `📊 Sisa kuota: ${remaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error processing debt/receivable record:', error);
+            await message.reply('❌ Gagal menyimpan data hutang/piutang: ' + error.message);
+        }
+    }
+
+    /**
+     * Clean and validate phone number
+     */
+    cleanPhoneNumber(phone) {
+        if (!phone || typeof phone !== 'string') return null;
+        
+        // Remove all non-digits
+        let cleaned = phone.replace(/\D/g, '');
+        
+        // Handle Indonesian phone numbers
+        if (cleaned.startsWith('62')) {
+            // Already in international format
+            return cleaned;
+        } else if (cleaned.startsWith('0')) {
+            // Convert to international format
+            return '62' + cleaned.substring(1);
+        } else if (cleaned.length >= 9 && cleaned.length <= 13) {
+            // Assume it's missing the leading 0
+            return '62' + cleaned;
+        }
+        
+        return null; // Invalid format
+    }
+
+    /**
+     * Handle manual debt command
+     */
+    async handleDebt(message, userPhone, args) {
+        if (args.length < 3) {
+            await message.reply(
+                '📝 Cara pakai: /hutang [nama] [jumlah] [keterangan]\n\n' +
+                'Contoh:\n' +
+                '• /hutang "Toko Budi" 150000 "sembako bulanan"\n' +
+                '• /hutang Warung 50000 "makan siang"\n\n' +
+                '💡 Gunakan tanda kutip jika nama mengandung spasi'
+            );
+            return;
+        }
+
+        await this.processManualDebtReceivable(message, userPhone, 'HUTANG', args);
+    }
+
+    /**
+     * Handle manual receivable command
+     */
+    async handleReceivable(message, userPhone, args) {
+        if (args.length < 3) {
+            await message.reply(
+                '📝 Cara pakai: /piutang [nama] [jumlah] [keterangan]\n\n' +
+                'Contoh:\n' +
+                '• /piutang "Warung Madura" 200000 "Voucher Wifi 2Rebuan"\n' +
+                '• /piutang Client 500000 "jasa desain"\n\n' +
+                '💡 Gunakan tanda kutip jika nama mengandung spasi'
+            );
+            return;
+        }
+
+        await this.processManualDebtReceivable(message, userPhone, 'PIUTANG', args);
+    }
+
+    /**
+     * Process manual debt/receivable entry
+     */
+    async processManualDebtReceivable(message, userPhone, type, args) {
+        try {
+            // Parse arguments
+            let clientName = args[0];
+            const amount = parseFloat(args[1]);
+            const description = args.slice(2).join(' ');
+
+            // Remove quotes if present
+            if (clientName.startsWith('"') && clientName.endsWith('"')) {
+                clientName = clientName.slice(1, -1);
+            }
+
+            // Validate amount
+            if (isNaN(amount) || amount <= 0) {
+                await message.reply('❌ Silakan masukkan jumlah yang valid.');
+                return;
+            }
+
+            // Check transaction limit
+            const limitCheck = await this.db.checkTransactionLimit(userPhone);
+            if (!limitCheck.allowed) {
+                if (limitCheck.reason === 'Daily limit reached') {
+                    await message.reply(
+                        `🚫 Kuota transaksi harian Free Plan Anda sudah habis (${limitCheck.subscription.transaction_count}/${limitCheck.subscription.monthly_transaction_limit})!\n\n` +
+                        '⏰ Kuota akan direset besok pagi.\n' +
+                        '💎 Upgrade ke Premium untuk unlimited transaksi.'
+                    );
+                } else {
+                    await message.reply('❌ Akses ditolak. Silakan periksa status subscription Anda.');
+                }
+                return;
+            }
+
+            // Add the record
+            const result = await this.debtReceivableService.addDebtReceivable(
+                userPhone, type, clientName, amount, description
+            );
+
+            // Increment transaction count
+            if (limitCheck.subscription.monthly_transaction_limit !== null) {
+                await this.db.incrementTransactionCount(userPhone);
+            }
+
+            const remaining = limitCheck.subscription.monthly_transaction_limit
+                ? limitCheck.remaining - 1
+                : '∞';
+
+            // Success response
+            const typeText = type === 'PIUTANG' ? 'Piutang' : 'Hutang';
+            let response = `✅ ${typeText} berhasil dicatat!\n\n`;
+            response += `👤 Client: ${clientName}\n`;
+            response += `💰 Jumlah: ${this.debtReceivableService.formatCurrency(amount)}\n`;
+            response += `📝 Keterangan: ${description}\n`;
+            response += `🆔 ID: ${result.recordId}\n\n`;
+            response += `📊 Sisa kuota: ${remaining}${limitCheck.subscription.monthly_transaction_limit ? `/${limitCheck.subscription.monthly_transaction_limit}` : ''}`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in processManualDebtReceivable:', error);
+            await message.reply('❌ Gagal mencatat hutang/piutang: ' + error.message);
+        }
+    }
+
+    /**
+     * Handle debt/receivable list command
+     */
+    async handleDebtReceivableList(message, userPhone, args) {
+        try {
+            const type = args[0] ? args[0].toUpperCase() : null;
+            const validTypes = ['HUTANG', 'PIUTANG'];
+            
+            if (type && !validTypes.includes(type)) {
+                await message.reply(
+                    '❌ Tipe tidak valid!\n\n' +
+                    '📝 Cara pakai:\n' +
+                    '• /hutang-piutang - lihat semua\n' +
+                    '• /hutang-piutang HUTANG - lihat hutang saja\n' +
+                    '• /hutang-piutang PIUTANG - lihat piutang saja'
+                );
+                return;
+            }
+
+            const records = await this.debtReceivableService.getDebtReceivables(userPhone, type);
+            
+            if (records.length === 0) {
+                const typeText = type ? 
+                    (type === 'HUTANG' ? 'hutang' : 'piutang') : 
+                    'hutang/piutang';
+                await message.reply(`📋 Tidak ada data ${typeText} yang ditemukan.`);
+                return;
+            }
+
+            // Group by type
+            const hutangRecords = records.filter(r => r.type === 'HUTANG');
+            const piutangRecords = records.filter(r => r.type === 'PIUTANG');
+
+            let response = `📋 *Daftar Hutang Piutang*\n\n`;
+
+            if (piutangRecords.length > 0) {
+                response += `📈 *PIUTANG (${piutangRecords.length}):*\n`;
+                piutangRecords.forEach((record, index) => {
+                    response += `${index + 1}. ${record.clientName}\n`;
+                    response += `   💰 ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
+                    response += `   📝 ${record.description}\n`;
+                    response += `   🆔 ID: ${record.id}\n`;
+                    if (record.clientPhone) {
+                        response += `   📱 ${record.clientPhone}\n`;
+                    }
+                    response += `\n`;
+                });
+            }
+
+            if (hutangRecords.length > 0) {
+                response += `📉 *HUTANG (${hutangRecords.length}):*\n`;
+                hutangRecords.forEach((record, index) => {
+                    response += `${index + 1}. ${record.clientName}\n`;
+                    response += `   💰 ${this.debtReceivableService.formatCurrency(record.amount)}\n`;
+                    response += `   📝 ${record.description}\n`;
+                    response += `   🆔 ID: ${record.id}\n`;
+                    if (record.clientPhone) {
+                        response += `   📱 ${record.clientPhone}\n`;
+                    }
+                    response += `\n`;
+                });
+            }
+
+            response += `💡 *Tip:* Gunakan /lunas [ID] untuk menandai sebagai lunas`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in handleDebtReceivableList:', error);
+            await message.reply('❌ Gagal mengambil daftar hutang/piutang: ' + error.message);
+        }
+    }
+
+    /**
+     * Handle debt/receivable summary
+     */
+    async handleDebtReceivableSummary(message, userPhone, args) {
+        try {
+            const summary = await this.debtReceivableService.getDebtReceivableSummary(userPhone);
+            
+            let response = `💰 *Ringkasan Hutang Piutang*\n\n`;
+            response += `📈 Total Piutang: ${this.debtReceivableService.formatCurrency(summary.totalPiutang)}\n`;
+            response += `📊 Jumlah: ${summary.countPiutang} transaksi\n\n`;
+            response += `📉 Total Hutang: ${this.debtReceivableService.formatCurrency(summary.totalHutang)}\n`;
+            response += `📊 Jumlah: ${summary.countHutang} transaksi\n\n`;
+            
+            const netBalanceText = summary.netBalance >= 0 ? 
+                `📈 Saldo Bersih: +${this.debtReceivableService.formatCurrency(summary.netBalance)}` :
+                `📉 Saldo Bersih: ${this.debtReceivableService.formatCurrency(summary.netBalance)}`;
+            
+            response += `${netBalanceText}\n\n`;
+            response += `💡 *Tips:*\n`;
+            response += `• /hutang-piutang untuk lihat detail\n`;
+            response += `• /lunas [ID] untuk tandai lunas`;
+
+            await message.reply(response);
+
+        } catch (error) {
+            this.logger.error('Error in handleDebtReceivableSummary:', error);
+            await message.reply('❌ Gagal mengambil ringkasan: ' + error.message);
+        }
+    }
+
+    /**
+     * Handle mark as paid command
+     */
+    async handleMarkAsPaid(message, userPhone, args) {
+        if (args.length === 0) {
+            await message.reply(
+                '📝 Cara pakai: /lunas [ID]\n\n' +
+                'Contoh: /lunas 123\n\n' +
+                '💡 Gunakan /hutang-piutang untuk melihat daftar ID'
+            );
+            return;
+        }
+
+        try {
+            const recordId = parseInt(args[0]);
+            if (isNaN(recordId)) {
+                await message.reply('❌ ID harus berupa angka!');
+                return;
+            }
+
+            await this.debtReceivableService.markAsPaid(userPhone, recordId);
+            
+            await message.reply(
+                `✅ Hutang/Piutang ID ${recordId} telah ditandai sebagai lunas!\n\n` +
+                '📊 Gunakan /saldo-hutang untuk melihat ringkasan terbaru'
+            );
+
+        } catch (error) {
+            this.logger.error('Error in handleMarkAsPaid:', error);
+            if (error.message.includes('not found')) {
+                await message.reply('❌ ID tidak ditemukan atau tidak valid!');
+            } else {
+                await message.reply('❌ Gagal menandai sebagai lunas: ' + error.message);
+            }
+        }
+    }
+
+    /**
+     * Handle debt list command (hutang saja)
+     */
+    async handleDebtList(message, userPhone, args) {
+        await this.handleDebtReceivableList(message, userPhone, ['HUTANG']);
+    }
+
+    /**
+     * Handle receivable list command (piutang saja)
+     */
+    async handleReceivableList(message, userPhone, args) {
+        await this.handleDebtReceivableList(message, userPhone, ['PIUTANG']);
+    }
+
+    /**
+     * Handle main menu command
+     */
+    async handleMainMenu(message, userPhone, args) {
+        try {
+            const user = await this.db.getUser(userPhone);
+            const subscription = await this.db.getUserSubscription(userPhone);
+            const isAdmin = await this.db.isUserAdmin(userPhone);
+            
+            const adminBadge = isAdmin ? ' 👑' : '';
+            const botName = process.env.BOT_NAME || 'Bot Keuangan';
+            const remaining = subscription.monthly_transaction_limit
+                ? subscription.monthly_transaction_limit - subscription.transaction_count
+                : '∞';
+
+            let menuText = `🏠 *MENU UTAMA*\n\n`;
+            menuText += `👤 Halo ${user.name}${adminBadge}!\n`;
+            menuText += `💎 Plan: ${subscription.display_name}\n`;
+            menuText += `📊 Sisa transaksi: ${remaining}${subscription.monthly_transaction_limit ? `/${subscription.monthly_transaction_limit}` : ''}\n\n`;
+
+            menuText += `💰 *TRANSAKSI UMUM:*\n`;
+            menuText += `📈 /masuk [jumlah] [keterangan] - Catat pemasukan\n`;
+            menuText += `📉 /keluar [jumlah] [keterangan] - Catat pengeluaran\n`;
+            menuText += `💵 /saldo - Cek saldo dan transaksi terbaru\n`;
+            menuText += `📊 /laporan [tanggal] - Laporan harian\n\n`;
+
+            menuText += `💳 *HUTANG & PIUTANG:* ⭐ NEW!\n`;
+            menuText += `📈 /daftar-piutang - Lihat siapa yang hutang ke Anda\n`;
+            menuText += `📉 /daftar-hutang - Lihat Anda hutang ke siapa\n`;
+            menuText += `📋 /hutang-piutang - Lihat semua hutang & piutang\n`;
+            menuText += `💰 /saldo-hutang - Ringkasan saldo hutang-piutang\n`;
+            menuText += `✅ /lunas [ID] - Tandai sebagai lunas\n\n`;
+
+            menuText += `🏷️ *KATEGORI:*\n`;
+            menuText += `📝 /kategori - Lihat semua kategori\n`;
+            menuText += `➕ /kategori-baru [nama] [type] - Tambah kategori\n\n`;
+
+            menuText += `🔍 *PENCARIAN & EDIT:*\n`;
+            menuText += `🔍 /cari [kata_kunci] - Cari transaksi\n`;
+            menuText += `✏️ /edit [ID] - Edit transaksi\n`;
+            menuText += `🗑️ /hapus [ID] - Hapus transaksi\n\n`;
+
+            if (this.ai.isAvailable()) {
+                menuText += `🤖 *FITUR AI:*\n`;
+                menuText += `💬 /chat [pesan] - Chat dengan AI\n`;
+                menuText += `📊 /analisis - Analisis keuangan AI\n`;
+                menuText += `💡 /saran - Saran keuangan personal\n`;
+                menuText += `🔮 /prediksi-ai - Prediksi keuangan\n`;
+                menuText += `💳 /bulk [daftar] - Input bulk transaksi\n\n`;
+            }
+
+            if (isAdmin) {
+                menuText += `👑 *ADMIN:*\n`;
+                menuText += `/menu-admin - Menu administrator\n\n`;
+            }
+
+            menuText += `❓ *BANTUAN:*\n`;
+            menuText += `/bantuan - Panduan lengkap\n`;
+            menuText += `/contoh - Contoh penggunaan\n\n`;
+
+            menuText += `💡 *Tips:* Anda juga bisa mengetik dengan bahasa natural!\n`;
+            menuText += `Contoh: "Beli nasi gudeg 15ribu" atau "Piutang Warung Madura 200K"`;
+
+            await message.reply(menuText);
+        } catch (error) {
+            this.logger.error('Error in handleMainMenu:', error);
+            await message.reply('❌ Terjadi kesalahan saat menampilkan menu.');
+        }
+    }
+
+    /**
+     * Handle help command
+     */
+    async handleHelp(message, userPhone, args) {
+        try {
+            const botName = process.env.BOT_NAME || 'Bot Keuangan';
+            
+            let helpText = `📚 *PANDUAN ${botName.toUpperCase()}*\n\n`;
+            
+            helpText += `🏠 *MENU & NAVIGASI:*\n`;
+            helpText += `/menu - Menu utama lengkap\n`;
+            helpText += `/bantuan - Panduan ini\n`;
+            helpText += `/contoh - Contoh penggunaan\n\n`;
+
+            helpText += `💰 *TRANSAKSI DASAR:*\n`;
+            helpText += `📈 /masuk 50000 makan siang\n`;
+            helpText += `📉 /keluar 25000 transport\n`;
+            helpText += `💵 /saldo - Lihat saldo\n`;
+            helpText += `📊 /laporan 2024-01-15\n\n`;
+
+            helpText += `💳 *HUTANG & PIUTANG:* ⭐ FITUR TERBARU!\n\n`;
+            
+            helpText += `📋 *Commands Hutang-Piutang:*\n`;
+            helpText += `📈 /daftar-piutang - Siapa yang hutang ke Anda\n`;
+            helpText += `📉 /daftar-hutang - Anda hutang ke siapa\n`;
+            helpText += `📋 /hutang-piutang - Lihat semua\n`;
+            helpText += `💰 /saldo-hutang - Ringkasan total\n`;
+            helpText += `✅ /lunas 123 - Tandai ID 123 lunas\n\n`;
+
+            helpText += `🗣️ *Input Natural Language:*\n`;
+            helpText += `"Piutang Warung Madura 200K voucher wifi"\n`;
+            helpText += `"Hutang ke Toko Budi 150K sembako"\n`;
+            helpText += `"082817728312" (nomor HP client)\n`;
+            helpText += `"tidak" (jika tidak ada nomor HP)\n\n`;
+
+            helpText += `📱 *Format Nomor HP:*\n`;
+            helpText += `✅ 082817728312\n`;
+            helpText += `✅ 6282817728312\n`;
+            helpText += `❌ +6282817728312 (tidak perlu "+")\n\n`;
+
+            helpText += `🏷️ *KATEGORI:*\n`;
+            helpText += `/kategori - Lihat semua\n`;
+            helpText += `/kategori-baru Makanan expense #FF5733\n\n`;
+
+            helpText += `🔍 *PENCARIAN & EDIT:*\n`;
+            helpText += `/cari makan - Cari transaksi\n`;
+            helpText += `/edit 123 - Edit transaksi ID 123\n`;
+            helpText += `/hapus 123 - Hapus transaksi ID 123\n\n`;
+
+            if (this.ai.isAvailable()) {
+                helpText += `🤖 *FITUR AI:*\n`;
+                helpText += `/chat Bagaimana cara menghemat?\n`;
+                helpText += `/analisis - Analisis pengeluaran\n`;
+                helpText += `/saran - Saran keuangan\n`;
+                helpText += `/prediksi-ai - Prediksi trend\n`;
+                helpText += `/bulk Makan 25k, transport 10k, kopi 5k\n\n`;
+            }
+
+            helpText += `💡 *TIPS PENGGUNAAN:*\n`;
+            helpText += `• Gunakan "k" untuk ribu (25k = 25.000)\n`;
+            helpText += `• Format tanggal: YYYY-MM-DD atau DD/MM/YYYY\n`;
+            helpText += `• ID transaksi bisa dilihat di /saldo\n`;
+            helpText += `• Bot mendukung bahasa natural Indonesia\n\n`;
+
+            helpText += `❓ *BUTUH BANTUAN?*\n`;
+            helpText += `• Ketik /menu untuk navigasi cepat\n`;
+            helpText += `• Ketik /contoh untuk melihat contoh\n`;
+            helpText += `• Hubungi admin jika ada masalah`;
+
+            await message.reply(helpText);
+        } catch (error) {
+            this.logger.error('Error in handleHelp:', error);
+            await message.reply('❌ Terjadi kesalahan saat menampilkan bantuan.');
         }
     }
 }

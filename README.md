@@ -22,6 +22,15 @@ A comprehensive WhatsApp bot for managing personal finances with AI-powered insi
 - ✅ **Transaction Search & Edit** - Find and modify transactions easily
 - ✅ **Bulk Transaction Processing** - Add multiple transactions at once with AI
 
+### 📋 Debt & Receivable Management (NEW!)
+- 💰 **Intelligent Debt/Receivable Tracking** - "Piutang Warung Madura Voucher Wifi 200K"
+- 🤖 **Natural Language Processing** - AI understands Indonesian debt/receivable patterns
+- 👥 **Auto Client Registration** - Automatically registers new clients/contacts
+- 📱 **Contact Management** - Store WhatsApp numbers for easy communication
+- 📊 **Comprehensive Reporting** - Track who owes you and who you owe
+- ✅ **Payment Tracking** - Mark debts as paid with timestamp
+- 🔍 **Smart Detection** - Auto-detect HUTANG vs PIUTANG from text
+
 ### AI-Powered Features (DeepSeek Integration)
 - 🤖 **Natural Language Processing** - "I spent 50k for lunch today"
 - 🤖 **Smart Categorization** - AI suggests appropriate categories
@@ -237,6 +246,25 @@ Permen 2k
 /prediksi-ai      # AI cash flow prediction
 /ringkasan-ai     # AI financial summary
 /kategori-otomatis # Auto-categorize transactions
+```
+
+### Debt & Receivable Management (NEW!)
+```
+# Manual Commands
+/piutang "Warung Madura" 200000 "Voucher Wifi 2Rebuan"
+/hutang "Toko Budi" 150000 "sembako bulanan"
+/hutang-piutang           # View all debt/receivables
+/hutang-piutang PIUTANG   # View receivables only
+/hutang-piutang HUTANG    # View debts only
+/saldo-hutang             # Debt/receivable summary
+/lunas 123                # Mark as paid
+
+# Natural Language (AI Powered)
+"Piutang Warung Madura Voucher Wifi 2Rebuan 200K"
+"Hutang ke Toko Budi sembako 150K"
+"Teman kantor belum bayar makan siang 50K"
+"Saya pinjam uang ke Pak RT 500K untuk modal"
+"Cicilan motor ke Yamaha bulan ini 1.2 juta"
 ```
 
 ### Data Management

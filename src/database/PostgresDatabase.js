@@ -545,6 +545,38 @@ class PostgresDatabase extends BaseDatabase {
                 FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
                 FOREIGN KEY (plan_id) REFERENCES subscription_plans(id),
                 UNIQUE(user_phone)
+            )`,
+
+            // Clients table untuk manajemen kontak hutang piutang
+            `CREATE TABLE IF NOT EXISTS clients (
+                id SERIAL PRIMARY KEY,
+                user_phone VARCHAR(20) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(20),
+                email VARCHAR(255),
+                address TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
+                UNIQUE(user_phone, name)
+            )`,
+
+            // Debt Receivables table untuk tracking hutang piutang
+            `CREATE TABLE IF NOT EXISTS debt_receivables (
+                id SERIAL PRIMARY KEY,
+                user_phone VARCHAR(20) NOT NULL,
+                client_id INTEGER NOT NULL,
+                type VARCHAR(10) CHECK(type IN ('HUTANG', 'PIUTANG')) NOT NULL,
+                amount NUMERIC(15,2) NOT NULL,
+                description TEXT,
+                status VARCHAR(20) DEFAULT 'active' CHECK(status IN ('active', 'paid', 'cancelled')),
+                due_date DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                paid_at TIMESTAMP,
+                notes TEXT,
+                FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
             )`
         ];
 
@@ -565,7 +597,16 @@ class PostgresDatabase extends BaseDatabase {
                 'CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status ON user_subscriptions(status)',
                 'CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)',
                 'CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active) WHERE is_active = true',
-                'CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type) WHERE is_active = true'
+                'CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type) WHERE is_active = true',
+                
+                // Indexes untuk Debt/Receivable tables
+                'CREATE INDEX IF NOT EXISTS idx_clients_user_phone ON clients(user_phone)',
+                'CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(user_phone, name)',
+                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_user_phone ON debt_receivables(user_phone)',
+                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_client ON debt_receivables(client_id)',
+                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_type_status ON debt_receivables(user_phone, type, status)',
+                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_created_at ON debt_receivables(created_at DESC)',
+                'CREATE INDEX IF NOT EXISTS idx_debt_receivables_due_date ON debt_receivables(due_date) WHERE due_date IS NOT NULL'
             ];
 
             for (const index of indexes) {
