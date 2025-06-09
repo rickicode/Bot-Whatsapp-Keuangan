@@ -44,6 +44,16 @@ const ENV_VARIABLES = [
     'ELEVENLABS_MODEL',
     'ELEVENLABS_LANGUAGE_ID',
     
+    // Redis Configuration for Session Management
+    'REDIS_ENABLED',
+    'REDIS_URL',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'REDIS_PASSWORD',
+    'REDIS_USERNAME',
+    'REDIS_DATABASE',
+    'REDIS_CONNECT_TIMEOUT',
+    
     // Database Configuration
     'DATABASE_TYPE',
     'DB_PATH',
@@ -164,6 +174,16 @@ const DEFAULT_VALUES = {
     'ELEVENLABS_MODEL': 'eleven_multilingual_v2',
     'ELEVENLABS_LANGUAGE_ID': 'id',
     
+    // Redis Configuration for Session Management
+    'REDIS_ENABLED': 'true',
+    'REDIS_URL': 'redis://localhost:6379',
+    'REDIS_HOST': 'localhost',
+    'REDIS_PORT': '6379',
+    'REDIS_PASSWORD': '',
+    'REDIS_USERNAME': '',
+    'REDIS_DATABASE': '0',
+    'REDIS_CONNECT_TIMEOUT': '5000',
+    
     // Database Configuration (PostgreSQL default)
     'DATABASE_TYPE': 'postgres',
     'DATABASE_HOST': 'localhost',
@@ -255,7 +275,7 @@ function createEnvFile() {
     });
     
     // Add any other environment variables that start with common prefixes
-    const additionalPrefixes = ['BOT_', 'DB_', 'DATABASE_', 'AI_', 'DEEPSEEK_', 'OPENAI_', 'OPENROUTER_', 'GROQ_', 'GOOGLE_', 'ELEVENLABS_', 'ANTI_SPAM_', 'WEBHOOK_', 'BACKUP_', 'LOG_', 'HEALTH_'];
+    const additionalPrefixes = ['BOT_', 'DB_', 'DATABASE_', 'AI_', 'DEEPSEEK_', 'OPENAI_', 'OPENROUTER_', 'GROQ_', 'GOOGLE_', 'ELEVENLABS_', 'REDIS_', 'ANTI_SPAM_', 'WEBHOOK_', 'BACKUP_', 'LOG_', 'HEALTH_'];
     Object.keys(process.env).forEach(key => {
         if (!ENV_VARIABLES.includes(key)) {
             const hasPrefix = additionalPrefixes.some(prefix => key.startsWith(prefix));
@@ -317,6 +337,22 @@ function createEnvFile() {
                 console.warn('⚠️  AI Curhat uses OpenRouter but OPENROUTER_API_KEY is missing or using placeholder value');
                 console.warn('   Get your API key from: https://openrouter.ai/');
             }
+        }
+        
+        // Redis validation
+        const redisEnabled = process.env.REDIS_ENABLED === 'true';
+        if (redisEnabled) {
+            const hasRedisUrl = process.env.REDIS_URL && process.env.REDIS_URL !== 'redis://localhost:6379';
+            const hasRedisHost = process.env.REDIS_HOST && process.env.REDIS_HOST !== 'localhost';
+            
+            if (hasRedisUrl || hasRedisHost) {
+                console.log('✅ Redis configuration detected for session management');
+            } else {
+                console.log('ℹ️  Redis enabled with localhost default configuration');
+                console.log('   For production, consider setting REDIS_URL or REDIS_HOST');
+            }
+        } else {
+            console.log('ℹ️  Redis disabled, using PostgreSQL for session storage');
         }
         
         // Database validation

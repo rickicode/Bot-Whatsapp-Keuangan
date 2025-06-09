@@ -32,6 +32,20 @@ else
     echo "🤖 AI Curhat mode disabled" >&2
 fi
 
+# Check Redis configuration
+if [ "$REDIS_ENABLED" = "true" ]; then
+    echo "🔄 Redis enabled for session management" >&2
+    if [ -n "$REDIS_URL" ] && [ "$REDIS_URL" != "redis://localhost:6379" ]; then
+        echo "🌐 Using Redis URL: ${REDIS_URL}" >&2
+    elif [ -n "$REDIS_HOST" ] && [ "$REDIS_HOST" != "localhost" ]; then
+        echo "🌐 Using Redis host: ${REDIS_HOST}:${REDIS_PORT:-6379}" >&2
+    else
+        echo "🏠 Using Redis localhost default configuration" >&2
+    fi
+else
+    echo "🗄️ Redis disabled, using PostgreSQL for sessions" >&2
+fi
+
 # Set up signal handlers for graceful shutdown
 cleanup() {
     echo "🛑 Received shutdown signal, cleaning up..." >&2

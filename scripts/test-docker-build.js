@@ -20,6 +20,7 @@ try {
         { name: 'Audio directory creation', pattern: '/app/temp/audio', found: false },
         { name: 'TTS environment variables', pattern: 'ELEVENLABS_TTS_ENABLED', found: false },
         { name: 'AI Curhat configuration', pattern: 'AI_CURHAT_ENABLED', found: false },
+        { name: 'Redis configuration', pattern: 'REDIS_ENABLED', found: false },
         { name: 'Language ID support', pattern: 'ELEVENLABS_LANGUAGE_ID', found: false },
         { name: 'Enhanced healthcheck', pattern: 'health.status', found: false }
     ];
@@ -53,10 +54,11 @@ templateFiles.forEach(file => {
         
         const hasTTS = content.includes('ELEVENLABS_TTS_ENABLED');
         const hasCurhat = content.includes('AI_CURHAT_ENABLED');
+        const hasRedis = content.includes('REDIS_ENABLED');
         const hasLanguageID = content.includes('ELEVENLABS_LANGUAGE_ID');
         
-        const status = (hasTTS && hasCurhat && hasLanguageID) ? '✅' : '⚠️';
-        console.log(`${status} ${file.name}: TTS=${hasTTS}, Curhat=${hasCurhat}, LangID=${hasLanguageID}`);
+        const status = (hasTTS && hasCurhat && hasRedis && hasLanguageID) ? '✅' : '⚠️';
+        console.log(`${status} ${file.name}: TTS=${hasTTS}, Curhat=${hasCurhat}, Redis=${hasRedis}, LangID=${hasLanguageID}`);
         
     } catch (error) {
         console.log(`❌ ${file.name}: File not found or error`);
@@ -77,9 +79,10 @@ dockerFiles.forEach(file => {
         
         const hasTTSSupport = content.includes('TTS') || content.includes('audio');
         const hasCurhatSupport = content.includes('CURHAT') || content.includes('curhat');
+        const hasRedisSupport = content.includes('REDIS') || content.includes('redis');
         
-        const status = (hasTTSSupport && hasCurhatSupport) ? '✅' : '⚠️';
-        console.log(`${status} ${file.name}: TTS=${hasTTSSupport}, Curhat=${hasCurhatSupport}`);
+        const status = (hasTTSSupport && hasCurhatSupport && hasRedisSupport) ? '✅' : '⚠️';
+        console.log(`${status} ${file.name}: TTS=${hasTTSSupport}, Curhat=${hasCurhatSupport}, Redis=${hasRedisSupport}`);
         
     } catch (error) {
         console.log(`❌ ${file.name}: File not found or error`);

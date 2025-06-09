@@ -68,6 +68,16 @@ ENV AI_CURHAT_ENABLED=true
 ENV AI_CURHAT_PROVIDER="openrouter"
 ENV AI_CURHAT_MODEL="deepseek/deepseek-chat-v3-0324:free"
 
+# Redis Configuration for Session Management
+ENV REDIS_ENABLED=true
+ENV REDIS_URL=""
+ENV REDIS_HOST="localhost"
+ENV REDIS_PORT="6379"
+ENV REDIS_PASSWORD=""
+ENV REDIS_USERNAME=""
+ENV REDIS_DATABASE="0"
+ENV REDIS_CONNECT_TIMEOUT="5000"
+
 # Add healthcheck with TTS and curhat support
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
     CMD node -e "const http = require('http'); \

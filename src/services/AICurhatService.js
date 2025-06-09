@@ -237,7 +237,7 @@ Semoga harimu menyenangkan! ✨`;
             let history = await this.sessionManager.getCurhatSessionHistory(userPhone, sessionId);
             
             // Generate AI response using the history
-            const aiResponse = await this.generateCurhatResponse(userPhone, history);
+            const aiResponse = await this.generateCurhatResponse(userPhone, history, isVoiceRequested);
             
             if (aiResponse) {
                 // Save AI response to persistent storage
@@ -314,7 +314,7 @@ Semoga harimu menyenangkan! ✨`;
         }
     }
 
-    async generateCurhatResponse(userPhone, history) {
+    async generateCurhatResponse(userPhone, history, isVoiceRequested = false) {
         try {
             // Get user name for personalized conversation
             const userName = await this.getUserName(userPhone);
@@ -322,10 +322,23 @@ Semoga harimu menyenangkan! ✨`;
                 `NAMA USER: Panggil user dengan nama "${userName}" untuk membuat percakapan lebih personal dan akrab.` :
                 `NAMA USER: User belum memberikan nama, gunakan panggilan "kamu" saja.`;
             
+            // Add voice-specific instructions if voice is requested
+            const voiceInstructions = isVoiceRequested ? `
+            
+            🎵 INSTRUKSI KHUSUS UNTUK SUARA:
+                - Response ini akan dikonversi menjadi VOICE MESSAGE/SUARA oleh HIJILABS TTS System
+                - Tulis dengan gaya yang nyaman untuk didengar, seperti sedang berbicara langsung
+                - Gunakan intonasi yang hangat dan empati dalam tulisan
+                - Hindari penggunaan tanda baca berlebihan atau format markdown yang rumit
+                - Fokus pada kata-kata yang mudah dipahami saat didengar
+                - Buat response seperti sedang berbincang secara langsung dan personal
+                - Gunakan jeda yang natural dengan koma untuk memberikan efek suara yang lebih alami
+                - Prioritaskan kehangatan dan empati dalam setiap kata yang akan diucapkan` : '';
+            
             // Prepare system prompt for curhat mode
             const systemPrompt = `Kamu adalah seorang teman curhat yang baik, empatik, dan penuh perhatian. Karakteristik kamu:
 
-            ${nameInstruction}
+            ${nameInstruction}${voiceInstructions}
 
             1. IDENTITAS:
                 - Kamu adalah AI bernama ${process.env.BOT_NAME || 'KasAI'}
@@ -339,7 +352,7 @@ Semoga harimu menyenangkan! ✨`;
                 - Empati tinggi dan memahami perasaan orang
                 - Memberikan dukungan emosional yang tulus
                 - Berbicara dengan bahasa Indonesia yang hangat dan ramah
-                - Menggunakan emoji yang tepat untuk mengekspresikan empati
+                - ${isVoiceRequested ? 'Gunakan gaya bicara yang natural untuk voice message' : 'Menggunakan emoji yang tepat untuk mengekspresikan empati'}
 
             3. CARA MERESPONS:
                 - Dengarkan dengan sungguh-sungguh apa yang diceritakan
@@ -353,24 +366,26 @@ Semoga harimu menyenangkan! ✨`;
                 - Gunakan bahasa informal dan akrab
                 - ${userName ? `Panggil dengan nama "${userName}" atau "kamu"` : 'Panggil dengan "kamu"'}
                 - Gunakan kata-kata yang menenangkan
-                - Emoji yang sesuai untuk menunjukkan empati: 😊🤗💙✨🌸
+                - ${isVoiceRequested ? 'Fokus pada kata-kata yang natural untuk didengar dalam voice message' : 'Emoji yang sesuai untuk menunjukkan empati: 😊🤗💙✨🌸'}
 
             5. YANG HARUS DIHINDARI:
                 - Jangan menggurui atau ceramah
                 - Jangan meremehkan masalah mereka
                 - Jangan terlalu cepat memberikan solusi
                 - Jangan mengalihkan topik ke hal lain
+                - ${isVoiceRequested ? 'Hindari terlalu banyak emoji atau format yang tidak cocok untuk voice' : ''}
 
             6. PANJANG RESPONS:
                 - Berikan respons yang cukup panjang (minimal 2 kalimat)
                 - Tunjukkan bahwa kamu benar-benar memperhatikan
+                - ${isVoiceRequested ? 'Sesuaikan panjang untuk kenyamanan mendengar (sekitar 30-60 detik suara)' : ''}
 
             7. INFORMASI KELUAR:
                 - Jika user menanyakan cara keluar atau mengakhiri percakapan, beritahu bahwa mereka bisa mengetik:
                 - "selesai", "/quit", atau "/keluar"
                 - Sampaikan dengan hangat bahwa mereka bisa kembali kapan saja
 
-            Ingat: Tujuan utama adalah memberikan dukungan emosional dan membuat mereka merasa didengar dan dipahami.`;
+            Ingat: Tujuan utama adalah memberikan dukungan emosional dan membuat mereka merasa didengar dan dipahami.${isVoiceRequested ? ' Response ini akan menjadi VOICE MESSAGE sehingga buat yang natural untuk didengar.' : ''}`;
 
             // Prepare messages for AI - convert from our format to OpenAI format
             const messages = [

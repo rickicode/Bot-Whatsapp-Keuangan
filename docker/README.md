@@ -214,7 +214,36 @@ AI_CURHAT_MODEL=deepseek/deepseek-chat-v3-0324:free
 - Indonesian language optimization
 - Automatic fallback to text on TTS failure
 
-## 📊 Resource Optimization
+## 🔄 Redis Session Management
+
+The Docker container now supports Redis for enhanced session management:
+
+### **Redis Configuration:**
+Required environment variables for Redis functionality:
+```bash
+REDIS_ENABLED=true
+REDIS_URL=redis://redis-server:6379
+# OR individual settings:
+REDIS_HOST=redis-server
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_DATABASE=0
+```
+
+### **Session Storage Strategy:**
+- **Redis Primary**: Fast session storage with auto-expiration
+- **PostgreSQL Fallback**: Persistent backup when Redis unavailable
+- **Automatic Sync**: Sessions synchronized between Redis and PostgreSQL
+- **Graceful Degradation**: Falls back to PostgreSQL-only if Redis fails
+
+### **Redis Features:**
+- WhatsApp session storage (QR codes, connection states)
+- Registration session management
+- AI Curhat conversation history caching
+- User preference storage (voice modes, settings)
+- Anti-spam rate limiting counters
+
+## � Resource Optimization
 
 ### **Memory Usage:**
 - Supervisord: ~10MB
