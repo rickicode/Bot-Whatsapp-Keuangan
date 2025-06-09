@@ -15,7 +15,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: whatsapp-financial-bot
+  IMAGE_NAME: kas-ai
 
 jobs:
   build-and-push:
