@@ -1,59 +1,31 @@
-# Multi-stage build for WhatsApp Financial Management Bot
-FROM node:20-alpine AS builder
-
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install git and build dependencies
-RUN apk add --no-cache git python3 make g++
-
-# Install dependencies
-RUN npm ci --only=production
-
-# Production stage
+# Lightweight build for WhatsApp Financial Management Bot
 FROM node:20-alpine
 
-# Install necessary packages
-RUN apk add --no-cache \
-    tzdata \
-    bash \
-    && rm -rf /var/cache/apk/*
-
-# Set timezone
-ENV TZ=Asia/Jakarta
-
-# Set working directory
-WORKDIR /app
-
-# Copy node modules from builder stage
-COPY --from=builder /app/node_modules ./node_modules
-
-# Copy application code
-COPY . .
-
-# Create necessary directories with proper permissions
-RUN mkdir -p /app/data /app/logs /app/exports /app/temp /app/temp/audio && \
+# Single RUN command to minimize layers and storage usage
+RUN apk add --no-cache tzdata bash && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* && \
+    mkdir -p /app/data /app/logs /app/exports /app/temp /app/temp/audio && \
     chmod 755 /app/data /app/logs /app/exports /app/temp /app/temp/audio
 
-# Don't create symlinks to avoid double logging
-# The application will log directly to stdout/stderr
+# Set environment and working directory
+ENV TZ=Asia/Jakarta \
+    NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=384"
+WORKDIR /app
 
-# Remove old cron jobs - application now handles cleanup internally
-# No external scripts needed for session cleanup or anti-spam monitoring
+# Copy package files and install dependencies in single layer
+COPY package*.json ./
+RUN npm ci --only=production --no-audit --no-fund && \
+    npm cache clean --force && \
+    rm -rf /tmp/* /var/tmp/* ~/.npm /root/.npm
 
-# Copy and set up entrypoint script
+# Copy application code and setup entrypoint in single layer
+COPY . .
 COPY docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Expose port
 EXPOSE 3000
-
-
-# Add logging configuration
-ENV NODE_OPTIONS="--max-old-space-size=512"
 
 # Add healthcheck with TTS and curhat support
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
