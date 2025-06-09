@@ -23,6 +23,27 @@ const ENV_VARIABLES = [
     'GROQ_API_KEY',
     'GOOGLE_API_KEY',
     
+    // OpenRouter Configuration
+    'OPENROUTER_API_KEY',
+    'OPENROUTER_BASE_URL',
+    'OPENROUTER_MODEL',
+    
+    // AI Fallback Configuration
+    'AI_FALLBACK_ORDER',
+    
+    // AI Curhat Mode Configuration
+    'AI_CURHAT_ENABLED',
+    'AI_CURHAT_PROVIDER',
+    'AI_CURHAT_MODEL',
+    
+    // TTS Configuration (ElevenLabs)
+    'ELEVENLABS_TTS_ENABLED',
+    'ELEVENLABS_API_KEY',
+    'ELEVENLABS_VOICE_ID',
+    'ELEVENLABS_BASE_URL',
+    'ELEVENLABS_MODEL',
+    'ELEVENLABS_LANGUAGE_ID',
+    
     // Database Configuration
     'DATABASE_TYPE',
     'DB_PATH',
@@ -122,6 +143,27 @@ const DEFAULT_VALUES = {
     'OPENAI_COMPATIBLE_BASE_URL': 'https://api.your-provider.com',
     'OPENAI_COMPATIBLE_MODEL': 'your_model_name',
     
+    // OpenRouter Configuration
+    'OPENROUTER_API_KEY': 'your_openrouter_api_key_here',
+    'OPENROUTER_BASE_URL': 'https://openrouter.ai/api',
+    'OPENROUTER_MODEL': 'deepseek/deepseek-chat-v3-0324:free',
+    
+    // AI Fallback Configuration
+    'AI_FALLBACK_ORDER': 'openrouter,deepseek,openai,groq',
+    
+    // AI Curhat Mode Configuration
+    'AI_CURHAT_ENABLED': 'true',
+    'AI_CURHAT_PROVIDER': 'openrouter',
+    'AI_CURHAT_MODEL': 'deepseek/deepseek-chat-v3-0324:free',
+    
+    // TTS Configuration (ElevenLabs)
+    'ELEVENLABS_TTS_ENABLED': 'false',
+    'ELEVENLABS_API_KEY': 'your_elevenlabs_api_key_here',
+    'ELEVENLABS_VOICE_ID': 'pNInz6obpgDQGcFmaJgB',
+    'ELEVENLABS_BASE_URL': 'https://api.elevenlabs.io/v1',
+    'ELEVENLABS_MODEL': 'eleven_multilingual_v2',
+    'ELEVENLABS_LANGUAGE_ID': 'id',
+    
     // Database Configuration (PostgreSQL default)
     'DATABASE_TYPE': 'postgres',
     'DATABASE_HOST': 'localhost',
@@ -213,7 +255,7 @@ function createEnvFile() {
     });
     
     // Add any other environment variables that start with common prefixes
-    const additionalPrefixes = ['BOT_', 'DB_', 'DATABASE_', 'AI_', 'DEEPSEEK_', 'OPENAI_', 'GROQ_', 'GOOGLE_', 'ANTI_SPAM_', 'WEBHOOK_', 'BACKUP_', 'LOG_', 'HEALTH_'];
+    const additionalPrefixes = ['BOT_', 'DB_', 'DATABASE_', 'AI_', 'DEEPSEEK_', 'OPENAI_', 'OPENROUTER_', 'GROQ_', 'GOOGLE_', 'ELEVENLABS_', 'ANTI_SPAM_', 'WEBHOOK_', 'BACKUP_', 'LOG_', 'HEALTH_'];
     Object.keys(process.env).forEach(key => {
         if (!ENV_VARIABLES.includes(key)) {
             const hasPrefix = additionalPrefixes.some(prefix => key.startsWith(prefix));
@@ -248,10 +290,33 @@ function createEnvFile() {
         }
         
         // Additional validation for AI providers
-        const hasAnyAIKey = process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY || process.env.GOOGLE_API_KEY;
+        const hasAnyAIKey = process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || process.env.GROQ_API_KEY || process.env.GOOGLE_API_KEY;
         if (!hasAnyAIKey) {
             console.warn('⚠️  No AI API keys detected!');
-            console.warn('   Please set at least one of: DEEPSEEK_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, GOOGLE_API_KEY');
+            console.warn('   Please set at least one of: DEEPSEEK_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, GOOGLE_API_KEY');
+        }
+        
+        // TTS validation
+        const ttsEnabled = process.env.ELEVENLABS_TTS_ENABLED === 'true';
+        if (ttsEnabled) {
+            if (!process.env.ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY === 'your_elevenlabs_api_key_here') {
+                console.warn('⚠️  TTS is enabled but ELEVENLABS_API_KEY is missing or using placeholder value');
+                console.warn('   Get your API key from: https://elevenlabs.io/');
+            } else {
+                console.log('✅ TTS (Text-to-Speech) configuration detected');
+            }
+        }
+        
+        // AI Curhat validation
+        const curhatEnabled = process.env.AI_CURHAT_ENABLED === 'true';
+        if (curhatEnabled) {
+            const curhatProvider = process.env.AI_CURHAT_PROVIDER || 'openrouter';
+            console.log(`✅ AI Curhat mode enabled with provider: ${curhatProvider}`);
+            
+            if (curhatProvider === 'openrouter' && (!process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY === 'your_openrouter_api_key_here')) {
+                console.warn('⚠️  AI Curhat uses OpenRouter but OPENROUTER_API_KEY is missing or using placeholder value');
+                console.warn('   Get your API key from: https://openrouter.ai/');
+            }
         }
         
         // Database validation
