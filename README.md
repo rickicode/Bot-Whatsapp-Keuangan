@@ -146,6 +146,45 @@ npm run docker:logs
 npm run docker:dev
 ```
 
+#### GitHub Actions Auto-Deploy to Docker Hub (NEW!)
+Automatically build and push Docker images to Docker Hub when code changes:
+
+```bash
+# Test Docker build locally before pushing
+./scripts/test-docker-github-workflow.sh
+
+# Push to main branch → builds latest tag
+git push origin main
+
+# Create version tag → builds versioned tags
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+**Setup:**
+1. Add secrets to GitHub repository:
+   - `DOCKER_USERNAME` - Docker Hub username
+   - `DOCKER_PASSWORD` - Docker Hub password/token
+2. Push code to trigger automatic builds
+3. Images available at: `yourusername/whatsapp-financial-bot:latest`
+
+**Pull from Docker Hub:**
+```bash
+# Pull latest image
+docker pull yourusername/whatsapp-financial-bot:latest
+
+# Run from Docker Hub
+docker run -d \
+  --name whatsapp-bot \
+  -p 3000:3000 \
+  -v ./data:/app/data \
+  -v ./logs:/app/logs \
+  --env-file .env \
+  yourusername/whatsapp-financial-bot:latest
+```
+
+📚 **Full Documentation:** [`docs/GITHUB_ACTIONS_DOCKER.md`](docs/GITHUB_ACTIONS_DOCKER.md)
+
 ### Environment Variables
 Buat file `.env` atau set di platform deployment:
 ```env
