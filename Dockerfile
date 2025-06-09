@@ -54,7 +54,7 @@ EXPOSE 3000
 
 # Add logging configuration
 ENV NODE_OPTIONS="--max-old-space-size=512"
-x
+
 
 # Add healthcheck with TTS and curhat support
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
