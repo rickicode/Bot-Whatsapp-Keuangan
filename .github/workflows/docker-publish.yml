@@ -3,7 +3,14 @@ name: Docker Build & Push
 on:
   push:
     branches:
-      - push
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 permissions:
