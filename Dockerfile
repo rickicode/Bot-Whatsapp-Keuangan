@@ -1,31 +1,72 @@
-# Lightweight build for WhatsApp Financial Management Bot
-FROM node:20-alpine
+# Multi-stage build for WhatsApp Financial Management Bot
+FROM node:20-alpine AS builder
 
-# Single RUN command to minimize layers and storage usage
-RUN apk add --no-cache tzdata bash && \
-    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* && \
-    mkdir -p /app/data /app/logs /app/exports /app/temp /app/temp/audio && \
-    chmod 755 /app/data /app/logs /app/exports /app/temp /app/temp/audio
-
-# Set environment and working directory
-ENV TZ=Asia/Jakarta \
-    NODE_ENV=production \
-    NODE_OPTIONS="--max-old-space-size=384"
+# Set working directory
 WORKDIR /app
 
-# Copy package files and install dependencies in single layer
+# Copy package files
 COPY package*.json ./
-RUN npm ci --only=production --no-audit --no-fund && \
-    npm cache clean --force && \
-    rm -rf /tmp/* /var/tmp/* ~/.npm /root/.npm
 
-# Copy application code and setup entrypoint in single layer
+# Install git and build dependencies
+RUN apk add --no-cache git python3 make g++
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Production stage
+FROM node:20-alpine
+
+# Install necessary packages
+RUN apk add --no-cache \
+    tzdata \
+    bash \
+    && rm -rf /var/cache/apk/*
+
+# Set timezone
+ENV TZ=Asia/Jakarta
+
+# Set working directory
+WORKDIR /app
+
+# Copy node modules from builder stage
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy application code
 COPY . .
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/data /app/logs /app/exports /app/temp /app/temp/audio && \
+    chmod 755 /app/data /app/logs /app/exports /app/temp /app/temp/audio
+
+# Don't create symlinks to avoid double logging
+# The application will log directly to stdout/stderr
+
+# Remove old cron jobs - application now handles cleanup internally
+# No external scripts needed for session cleanup or anti-spam monitoring
+
+# Copy and set up entrypoint script
 COPY docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Expose port
 EXPOSE 3000
+
+
+# Add logging configuration
+ENV NODE_OPTIONS="--max-old-space-size=512"
+
+# TTS Configuration Environment Variables
+ENV ELEVENLABS_TTS_ENABLED=false
+ENV ELEVENLABS_API_KEY=""
+ENV ELEVENLABS_VOICE_ID="pNInz6obpgDQGcFmaJgB"
+ENV ELEVENLABS_BASE_URL="https://api.elevenlabs.io/v1"
+ENV ELEVENLABS_MODEL="eleven_multilingual_v2"
+ENV ELEVENLABS_LANGUAGE_ID="id"
+
+# AI Curhat Configuration
+ENV AI_CURHAT_ENABLED=true
+ENV AI_CURHAT_PROVIDER="openrouter"
+ENV AI_CURHAT_MODEL="deepseek/deepseek-chat-v3-0324:free"
 
 # Add healthcheck with TTS and curhat support
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
