@@ -54,19 +54,7 @@ EXPOSE 3000
 
 # Add logging configuration
 ENV NODE_OPTIONS="--max-old-space-size=512"
-
-# TTS Configuration Environment Variables
-ENV ELEVENLABS_TTS_ENABLED=false
-ENV ELEVENLABS_API_KEY=""
-ENV ELEVENLABS_VOICE_ID="pNInz6obpgDQGcFmaJgB"
-ENV ELEVENLABS_BASE_URL="https://api.elevenlabs.io/v1"
-ENV ELEVENLABS_MODEL="eleven_multilingual_v2"
-ENV ELEVENLABS_LANGUAGE_ID="id"
-
-# AI Curhat Configuration
-ENV AI_CURHAT_ENABLED=true
-ENV AI_CURHAT_PROVIDER="openrouter"
-ENV AI_CURHAT_MODEL="deepseek/deepseek-chat-v3-0324:free"
+x
 
 # Add healthcheck with TTS and curhat support
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
