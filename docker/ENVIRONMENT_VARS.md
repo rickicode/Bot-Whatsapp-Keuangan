@@ -46,9 +46,35 @@ DEEPSEEK_MODEL=deepseek-chat
 OPENAI_API_KEY=your_openai_api_key
 GROQ_API_KEY=your_groq_api_key
 GOOGLE_API_KEY=your_google_api_key
+
+# OpenRouter Configuration
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_BASE_URL=https://openrouter.ai/api
+OPENROUTER_MODEL=deepseek/deepseek-chat-v3-0324:free
+
+# AI Fallback Order
+AI_FALLBACK_ORDER=openrouter,deepseek,openai,groq
 ```
 
-### **🗄️ Database Configuration (Supabase)**
+### **💬 AI Curhat Mode Configuration**
+```bash
+AI_CURHAT_ENABLED=true
+AI_CURHAT_PROVIDER=openrouter
+AI_CURHAT_MODEL=deepseek/deepseek-chat-v3-0324:free
+```
+
+### **🗣️ TTS (Text-to-Speech) Configuration**
+```bash
+# ElevenLabs TTS for voice responses
+ELEVENLABS_TTS_ENABLED=false
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+ELEVENLABS_VOICE_ID=pNInz6obpgDQGcFmaJgB
+ELEVENLABS_BASE_URL=https://api.elevenlabs.io/v1
+ELEVENLABS_MODEL=eleven_multilingual_v2
+ELEVENLABS_LANGUAGE_ID=id
+```
+
+### **�️ Database Configuration (Supabase)**
 ```bash
 DATABASE_TYPE=postgres
 DATABASE_HOST=your-project.supabase.co
@@ -173,6 +199,42 @@ AI_PROVIDER=deepseek
 DEEPSEEK_API_KEY=sk-live-key
 ANTI_SPAM_EMERGENCY_BRAKE=true
 ENABLE_AI_FEATURES=true
+
+# AI Curhat & TTS Features
+AI_CURHAT_ENABLED=true
+AI_CURHAT_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxx
+ELEVENLABS_TTS_ENABLED=true
+ELEVENLABS_API_KEY=sk_xxxxxxxxxxxxxxxx
+ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+ELEVENLABS_LANGUAGE_ID=id
+```
+
+### **Production with TTS Features:**
+```bash
+# Enhanced configuration with voice responses
+NODE_ENV=production
+AI_CURHAT_ENABLED=true
+AI_CURHAT_PROVIDER=openrouter
+OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_MODEL=deepseek/deepseek-chat-v3-0324:free
+
+# TTS Configuration
+ELEVENLABS_TTS_ENABLED=true
+ELEVENLABS_API_KEY=your_elevenlabs_key
+ELEVENLABS_VOICE_ID=pNInz6obpgDQGcFmaJgB
+ELEVENLABS_MODEL=eleven_multilingual_v2
+ELEVENLABS_LANGUAGE_ID=id
+
+# Database
+DATABASE_HOST=your-project.supabase.co
+DATABASE_PASSWORD=your_password
+DATABASE_SSL=true
+
+# Security
+BOT_ADMIN_PHONE=+6281234567890
+SESSION_SECRET=your_session_secret
+ENCRYPTION_KEY=your_encryption_key
 ```
 
 ## 🔍 Troubleshooting Environment Variables

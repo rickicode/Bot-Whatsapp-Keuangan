@@ -180,18 +180,54 @@ All services output structured logs with prefixes:
 [LOGROTATE] Running cleanup at Wed Jun 4 13:46:00 UTC 2025
 ```
 
+## 🎵 TTS (Text-to-Speech) Support
+
+The Docker container now supports TTS functionality with ElevenLabs API:
+
+### **Audio Directory:**
+- Container includes `/app/temp/audio` for temporary audio files
+- Automatic cleanup of old audio files (configurable)
+- Proper permissions for audio file generation
+
+### **TTS Configuration:**
+Required environment variables for TTS functionality:
+```bash
+ELEVENLABS_TTS_ENABLED=true
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+ELEVENLABS_VOICE_ID=pNInz6obpgDQGcFmaJgB
+ELEVENLABS_BASE_URL=https://api.elevenlabs.io/v1
+ELEVENLABS_MODEL=eleven_multilingual_v2
+ELEVENLABS_LANGUAGE_ID=id
+```
+
+### **AI Curhat Mode:**
+Enhanced conversational AI with voice support:
+```bash
+AI_CURHAT_ENABLED=true
+AI_CURHAT_PROVIDER=openrouter
+AI_CURHAT_MODEL=deepseek/deepseek-chat-v3-0324:free
+```
+
+### **Voice Features:**
+- Dynamic voice request detection
+- User voice preferences (always/never/ask)
+- Indonesian language optimization
+- Automatic fallback to text on TTS failure
+
 ## 📊 Resource Optimization
 
 ### **Memory Usage:**
 - Supervisord: ~10MB
-- Main Bot: ~180MB
+- Main Bot: ~190MB (with TTS)
 - Monitor Services: ~40MB total
-- **Total: ~230MB**
+- Audio Processing: ~20MB peak
+- **Total: ~260MB**
 
 ### **CPU Usage:**
 - Idle: ~5%
 - Normal Load: ~15-25%
-- Peak Load: ~60%
+- Peak Load (with TTS): ~70%
+- Audio Generation: ~40% spike
 
 ## 🛡️ Security Features
 

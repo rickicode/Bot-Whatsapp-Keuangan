@@ -255,7 +255,7 @@ Semoga harimu menyenangkan! ✨`;
             } else {
                 return {
                     type: 'text',
-                    content: '😅 Maaf, aku sedang sedikit bingung. Bisa coba ceritakan lagi?'
+                    content: 'Maaf, Response Suara lagi gak tersedia, Coba ceritakan lagi ya.'
                 };
             }
 
