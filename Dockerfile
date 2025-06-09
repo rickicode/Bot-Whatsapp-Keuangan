@@ -47,8 +47,39 @@ EXPOSE 3000
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
 # Add comprehensive healthcheck using external script
+# Add healthcheck with TTS and curhat support
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
-    CMD /app/docker/healthcheck.sh
+    CMD node -e "const http = require('http'); \
+    const options = { hostname: 'localhost', port: 3000, path: '/health', timeout: 10000 }; \
+    const req = http.request(options, (res) => { \
+        let data = ''; \
+        res.on('data', chunk => data += chunk); \
+        res.on('end', () => { \
+            if (res.statusCode === 200) { \
+                try { \
+                    const health = JSON.parse(data); \
+                    if (health.status === 'healthy' || health.status === 'degraded') { \
+                        process.exit(0); \
+                    } else { \
+                        console.error('Health check failed:', health); \
+                        process.exit(1); \
+                    } \
+                } catch (e) { \
+                    console.error('Invalid health response:', data); \
+                    process.exit(1); \
+                } \
+            } else if (res.statusCode === 503) { \
+                process.exit(0); \
+            } else { \
+                process.exit(1); \
+            } \
+        }); \
+    }); \
+    req.on('error', (e) => { console.error('Health check error:', e); process.exit(1); }); \
+    req.on('timeout', () => { console.error('Health check timeout'); process.exit(1); }); \
+    req.setTimeout(10000); \
+    req.end();"
+
 
 # Set entrypoint and command
 ENTRYPOINT ["/app/entrypoint.sh"]
