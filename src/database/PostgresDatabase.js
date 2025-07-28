@@ -678,9 +678,14 @@ class PostgresDatabase extends BaseDatabase {
                 sql: 'CREATE TRIGGER update_transactions_updated_at BEFORE UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
             },
             {
-                name: 'update_debts_updated_at',
-                table: 'debts',
-                sql: 'CREATE TRIGGER update_debts_updated_at BEFORE UPDATE ON debts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+                name: 'update_debt_receivables_updated_at',
+                table: 'debt_receivables',
+                sql: 'CREATE TRIGGER update_debt_receivables_updated_at BEFORE UPDATE ON debt_receivables FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+            },
+            {
+                name: 'update_clients_updated_at',
+                table: 'clients',
+                sql: 'CREATE TRIGGER update_clients_updated_at BEFORE UPDATE ON clients FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
             },
             {
                 name: 'update_settings_updated_at',
@@ -701,13 +706,24 @@ class PostgresDatabase extends BaseDatabase {
 
         for (const trigger of triggers) {
             try {
+                // First check if the table exists
+                const tableExists = await this.sql`
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = ${trigger.table} AND table_schema = 'public'
+                `;
+
+                if (tableExists.length === 0) {
+                    this.logger.warn(`Skipping trigger ${trigger.name}: table '${trigger.table}' does not exist`);
+                    continue;
+                }
+
                 // Check if trigger exists
-                const exists = await this.sql`
+                const triggerExists = await this.sql`
                     SELECT 1 FROM information_schema.triggers
                     WHERE trigger_name = ${trigger.name} AND event_object_table = ${trigger.table}
                 `;
 
-                if (exists.length === 0) {
+                if (triggerExists.length === 0) {
                     await this.sql.unsafe(trigger.sql);
                     this.logger.info(`Created trigger: ${trigger.name}`);
                 } else {

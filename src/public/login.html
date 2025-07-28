@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Dashboard Bot WhatsApp Keuangan</title>
+    <link rel="stylesheet" href="css/login.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h1>FinanceBot Dashboard</h1>
+                </div>
+                <p class="subtitle">Masuk ke panel admin untuk melihat statistik dan status bot</p>
+            </div>
+            
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="username">
+                        <i class="fas fa-user"></i>
+                        Username
+                    </label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        required 
+                        placeholder="Masukkan username"
+                        autocomplete="username"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">
+                        <i class="fas fa-lock"></i>
+                        Password
+                    </label>
+                    <div class="password-input">
+                        <input 
+                            type="password" 
+                            id="password" 
+                            name="password" 
+                            required 
+                            placeholder="Masukkan password"
+                            autocomplete="current-password"
+                        >
+                        <button type="button" class="password-toggle" id="togglePassword">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="form-group checkbox-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="rememberMe" name="rememberMe">
+                        <span class="checkmark"></span>
+                        Ingat saya
+                    </label>
+                </div>
+                
+                <button type="submit" class="login-btn" id="loginBtn">
+                    <i class="fas fa-sign-in-alt"></i>
+                    <span>Masuk Dashboard</span>
+                </button>
+                
+                <div id="loginMessage" class="login-message"></div>
+            </form>
+            
+            <div class="login-footer">
+                <div class="divider">
+                    <span>atau</span>
+                </div>
+                
+                <a href="/" class="back-home">
+                    <i class="fas fa-home"></i>
+                    Kembali ke Beranda
+                </a>
+                
+                <div class="login-info">
+                    <h3>💡 Info Login</h3>
+                    <div class="info-item">
+                        <i class="fas fa-key"></i>
+                        <span>Username default: <code>admin</code></span>
+                    </div>
+                    <div class="info-item">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Password dapat dikonfigurasi via environment variable</span>
+                    </div>
+                    <div class="info-item">
+                        <i class="fas fa-clock"></i>
+                        <span>Session berlaku 24 jam</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="background-decoration">
+            <div class="circle circle-1"></div>
+            <div class="circle circle-2"></div>
+            <div class="circle circle-3"></div>
+        </div>
+    </div>
+    
+    <script src="js/login.js"></script>
+</body>
+</html>

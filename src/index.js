@@ -19,6 +19,8 @@ const TypingManager = require('./utils/TypingManager');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const session = require('express-session');
+const bcrypt = require('bcrypt');
 const cron = require('node-cron');
 const ReminderService = require('./services/ReminderService');
 const MessagingAPIService = require('./services/MessagingAPIService');
@@ -43,6 +45,10 @@ class WhatsAppFinancialBot {
         this.antiSpam = new AntiSpamManager();
         this.app = express();
         this.processedMessages = new Set(); // Track processed messages to prevent duplicates
+        
+        // Store port for consistent usage throughout the app
+        this.port = parseInt(process.env.PORT) || 3000;
+        
         this.setupExpress();
         this.ensureDataDirectories();
     }
@@ -70,8 +76,26 @@ class WhatsAppFinancialBot {
         this.app.use(cors());
         this.app.use(express.json());
         
+        // Session configuration
+        this.app.use(session({
+            secret: process.env.SESSION_SECRET || 'whatsapp-finance-bot-secret-key-change-in-production',
+            resave: false,
+            saveUninitialized: false,
+            cookie: {
+                secure: false, // Set to true in production with HTTPS
+                httpOnly: true,
+                maxAge: 24 * 60 * 60 * 1000 // 24 hours
+            }
+        }));
+        
         // Serve static files from public directory
         this.app.use(express.static(path.join(__dirname, 'public')));
+        
+        // Setup authentication routes
+        this.setupAuthRoutes();
+        
+        // Setup dashboard routes
+        this.setupDashboardRoutes();
         
         // QR Code state - initialize as disconnected
         this.currentQRCode = null;
@@ -596,6 +620,425 @@ class WhatsAppFinancialBot {
         });
     }
 
+    // Authentication routes
+    setupAuthRoutes() {
+        // Default credentials
+        const defaultUsername = process.env.DASHBOARD_USERNAME || 'admin';
+        const defaultPassword = process.env.DASHBOARD_PASSWORD || 'admin123';
+
+        // Login route
+        this.app.post('/auth/login', async (req, res) => {
+            try {
+                const { username, password, rememberMe } = req.body;
+
+                if (!username || !password) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Username dan password wajib diisi'
+                    });
+                }
+
+                // Simple authentication check
+                if (username === defaultUsername && password === defaultPassword) {
+                    req.session.authenticated = true;
+                    req.session.username = username;
+                    req.session.loginTime = new Date();
+
+                    this.logger.info(`Dashboard login successful for user: ${username}`);
+
+                    res.json({
+                        success: true,
+                        message: 'Login berhasil',
+                        user: {
+                            username: username,
+                            loginTime: req.session.loginTime
+                        }
+                    });
+                } else {
+                    this.logger.warn(`Dashboard login failed for user: ${username}`);
+                    res.status(401).json({
+                        success: false,
+                        message: 'Username atau password salah'
+                    });
+                }
+            } catch (error) {
+                this.logger.error('Login error:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Terjadi kesalahan server'
+                });
+            }
+        });
+
+        // Logout route
+        this.app.post('/auth/logout', (req, res) => {
+            const username = req.session.username;
+            req.session.destroy((err) => {
+                if (err) {
+                    this.logger.error('Logout error:', err);
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Gagal logout'
+                    });
+                }
+
+                this.logger.info(`Dashboard logout for user: ${username}`);
+                res.json({
+                    success: true,
+                    message: 'Logout berhasil'
+                });
+            });
+        });
+
+        // Auth status check
+        this.app.get('/auth/status', (req, res) => {
+            res.json({
+                authenticated: !!req.session.authenticated,
+                username: req.session.username || null,
+                loginTime: req.session.loginTime || null
+            });
+        });
+    }
+
+    // Dashboard authentication middleware
+    requireAuth(req, res, next) {
+        if (!req.session.authenticated) {
+            return res.status(401).json({
+                error: 'Authentication required',
+                message: 'Please login to access dashboard'
+            });
+        }
+        next();
+    }
+
+    // Dashboard routes
+    setupDashboardRoutes() {
+        // Dashboard page route
+        this.app.get('/dashboard', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+        });
+
+        // Login page route
+        this.app.get('/login', (req, res) => {
+            res.sendFile(path.join(__dirname, 'public', 'login.html'));
+        });
+
+        // Dashboard API routes
+        this.app.get('/api/dashboard/stats', this.requireAuth.bind(this), async (req, res) => {
+            try {
+                const stats = await this.getDashboardStats();
+                res.json(stats);
+            } catch (error) {
+                this.logger.error('Dashboard stats error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.get('/api/dashboard/users', this.requireAuth.bind(this), async (req, res) => {
+            try {
+                const userStats = await this.getUserStats();
+                res.json(userStats);
+            } catch (error) {
+                this.logger.error('User stats error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.get('/api/dashboard/whatsapp', this.requireAuth.bind(this), async (req, res) => {
+            try {
+                const whatsappStats = await this.getWhatsAppStats();
+                res.json(whatsappStats);
+            } catch (error) {
+                this.logger.error('WhatsApp stats error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.get('/api/dashboard/system', this.requireAuth.bind(this), async (req, res) => {
+            try {
+                const systemStats = await this.getSystemStats();
+                res.json(systemStats);
+            } catch (error) {
+                this.logger.error('System stats error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.get('/api/dashboard/logs', this.requireAuth.bind(this), async (req, res) => {
+            try {
+                const logs = await this.getRecentLogs();
+                res.json({ logs });
+            } catch (error) {
+                this.logger.error('Logs error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        this.app.post('/api/dashboard/action/:action', this.requireAuth.bind(this), async (req, res) => {
+            try {
+                const action = req.params.action;
+                const result = await this.performDashboardAction(action);
+                res.json(result);
+            } catch (error) {
+                this.logger.error(`Dashboard action ${req.params.action} error:`, error);
+                res.status(500).json({ 
+                    success: false, 
+                    error: error.message 
+                });
+            }
+        });
+
+        // QR Scan API for dashboard
+        this.app.get('/api/dashboard/qr-status', this.requireAuth.bind(this), (req, res) => {
+            try {
+                let hasActiveConnection = false;
+                
+                if (this.sock && this.isWhatsAppConnected) {
+                    hasActiveConnection = !!(this.sock.user && this.sock.user.id);
+                    
+                    if (this.sock.readyState) {
+                        hasActiveConnection = hasActiveConnection && this.sock.readyState === 'open';
+                    }
+                }
+                
+                res.json({
+                    success: true,
+                    data: {
+                        qr: this.currentQRCode,
+                        connected: hasActiveConnection,
+                        phoneNumber: hasActiveConnection && this.sock?.user ? this.sock.user.id.split(':')[0] : null,
+                        connectionStatus: this.isWhatsAppConnected ? 'connected' : 'disconnected'
+                    }
+                });
+            } catch (error) {
+                this.logger.error('Dashboard QR status error:', error);
+                res.status(500).json({ 
+                    success: false, 
+                    error: error.message 
+                });
+            }
+        });
+
+        this.app.post('/api/dashboard/qr-refresh', this.requireAuth.bind(this), (req, res) => {
+            try {
+                this.currentQRCode = null;
+                this.isWhatsAppConnected = false;
+                this.logger.info('QR Code refresh requested from dashboard');
+                
+                // Restart WhatsApp connection to generate new QR
+                setTimeout(() => {
+                    this.connectToBaileys();
+                }, 1000);
+                
+                res.json({ 
+                    success: true, 
+                    message: 'QR Code refresh initiated' 
+                });
+            } catch (error) {
+                this.logger.error('Dashboard QR refresh error:', error);
+                res.status(500).json({ 
+                    success: false, 
+                    error: error.message 
+                });
+            }
+        });
+    }
+
+    // Dashboard data methods
+    async getDashboardStats() {
+        const stats = {
+            users: { total: 0 },
+            messages: { today: 0 },
+            userGrowth: {
+                labels: ['6 days ago', '5 days ago', '4 days ago', '3 days ago', '2 days ago', 'Yesterday', 'Today'],
+                data: [5, 8, 12, 15, 18, 22, 25]
+            },
+            messageVolume: {
+                labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+                data: Array.from({length: 24}, () => Math.floor(Math.random() * 50))
+            }
+        };
+
+        try {
+            if (this.db) {
+                // Get user count
+                const userCount = await this.db.query('SELECT COUNT(*) as count FROM users');
+                stats.users.total = userCount.rows[0]?.count || 0;
+
+                // Get today's messages (mock data for now)
+                stats.messages.today = Math.floor(Math.random() * 100) + 50;
+            }
+        } catch (error) {
+            this.logger.error('Error getting dashboard stats:', error);
+        }
+
+        return stats;
+    }
+
+    async getUserStats() {
+        const userStats = {
+            total: 0,
+            freePlan: 0,
+            premium: 0,
+            activeWeek: 0,
+            recentUsers: []
+        };
+
+        try {
+            if (this.db) {
+                // Get total users
+                const totalResult = await this.db.query('SELECT COUNT(*) as count FROM users');
+                userStats.total = parseInt(totalResult.rows[0]?.count || 0);
+
+                // Get subscription breakdown
+                const subResult = await this.db.query(`
+                    SELECT subscription_type, COUNT(*) as count 
+                    FROM users 
+                    GROUP BY subscription_type
+                `);
+                
+                subResult.rows.forEach(row => {
+                    if (row.subscription_type === 'free') {
+                        userStats.freePlan = parseInt(row.count);
+                    } else if (row.subscription_type === 'premium') {
+                        userStats.premium = parseInt(row.count);
+                    }
+                });
+
+                // Get active users this week (mock for now)
+                userStats.activeWeek = Math.floor(userStats.total * 0.7);
+
+                // Get recent users
+                const recentResult = await this.db.query(`
+                    SELECT name, phone_number, created_at 
+                    FROM users 
+                    ORDER BY created_at DESC 
+                    LIMIT 10
+                `);
+                
+                userStats.recentUsers = recentResult.rows.map(user => ({
+                    name: user.name,
+                    phone: user.phone_number,
+                    createdAt: user.created_at
+                }));
+            }
+        } catch (error) {
+            this.logger.error('Error getting user stats:', error);
+        }
+
+        return userStats;
+    }
+
+    async getWhatsAppStats() {
+        const whatsappStats = {
+            phoneNumber: 'Unknown',
+            connectedAt: null,
+            messagesSent: 0,
+            messagesReceived: 0,
+            failedMessages: 0,
+            spamBlocked: 0
+        };
+
+        try {
+            if (this.sock && this.sock.user) {
+                whatsappStats.phoneNumber = this.sock.user.id.split(':')[0];
+                whatsappStats.connectedAt = new Date();
+            }
+
+            // Mock message statistics
+            whatsappStats.messagesSent = Math.floor(Math.random() * 500) + 100;
+            whatsappStats.messagesReceived = Math.floor(Math.random() * 600) + 150;
+            whatsappStats.failedMessages = Math.floor(Math.random() * 10);
+            whatsappStats.spamBlocked = Math.floor(Math.random() * 25);
+
+        } catch (error) {
+            this.logger.error('Error getting WhatsApp stats:', error);
+        }
+
+        return whatsappStats;
+    }
+
+    async getSystemStats() {
+        const systemStats = {
+            memory: process.memoryUsage(),
+            database: { connected: false },
+            activeServices: 0,
+            errorRate: Math.floor(Math.random() * 5),
+            services: []
+        };
+
+        try {
+            // Test database connection
+            if (this.db) {
+                try {
+                    await this.db.testConnection();
+                    systemStats.database.connected = true;
+                } catch (error) {
+                    systemStats.database.connected = false;
+                }
+            }
+
+            // Count active services
+            const services = [
+                { name: 'WhatsApp Connection', status: this.isWhatsAppConnected ? 'connected' : 'disconnected', description: 'WhatsApp Bot Connection' },
+                { name: 'Database', status: systemStats.database.connected ? 'connected' : 'error', description: 'PostgreSQL Database' },
+                { name: 'Anti-Spam Manager', status: this.antiSpam ? 'connected' : 'error', description: 'Message Rate Limiting' },
+                { name: 'AI Service', status: this.aiService ? 'connected' : 'error', description: 'AI Assistant Service' },
+                { name: 'Trial Scheduler', status: this.trialScheduler ? 'connected' : 'error', description: 'Trial Management' },
+                { name: 'Typing Manager', status: this.typingManager ? 'connected' : 'error', description: 'Natural Typing Simulation' },
+                { name: 'Messaging API', status: this.messagingAPI ? 'connected' : 'error', description: 'REST API Service' }
+            ];
+
+            systemStats.services = services;
+            systemStats.activeServices = services.filter(s => s.status === 'connected').length;
+
+        } catch (error) {
+            this.logger.error('Error getting system stats:', error);
+        }
+
+        return systemStats;
+    }
+
+    async getRecentLogs() {
+        // Mock log data for now - you can implement actual log retrieval
+        const logs = [
+            { timestamp: new Date(), level: 'info', message: 'WhatsApp connection established' },
+            { timestamp: new Date(Date.now() - 60000), level: 'info', message: 'User registration completed' },
+            { timestamp: new Date(Date.now() - 120000), level: 'warn', message: 'Rate limit warning for user' },
+            { timestamp: new Date(Date.now() - 180000), level: 'info', message: 'Database backup completed' },
+            { timestamp: new Date(Date.now() - 240000), level: 'error', message: 'Failed to send message to user' }
+        ];
+
+        return logs;
+    }
+
+    async performDashboardAction(action) {
+        switch (action) {
+            case 'restart-whatsapp':
+                this.logger.info('Dashboard action: Restarting WhatsApp connection');
+                setTimeout(() => {
+                    this.connectToBaileys();
+                }, 1000);
+                return { success: true, message: 'WhatsApp restart initiated' };
+
+            case 'clear-cache':
+                this.logger.info('Dashboard action: Clearing cache');
+                // Clear various caches
+                if (global.pendingTransactions) global.pendingTransactions.clear();
+                if (global.editSessions) global.editSessions.clear();
+                if (global.deleteConfirmations) global.deleteConfirmations.clear();
+                return { success: true, message: 'Cache cleared successfully' };
+
+            case 'export-data':
+                this.logger.info('Dashboard action: Exporting data');
+                // Mock export - implement actual export logic
+                return { success: true, message: 'Data export started', downloadUrl: '/exports/data.csv' };
+
+            default:
+                throw new Error(`Unknown action: ${action}`);
+        }
+    }
+
     validateEnvironment() {
         this.logger.info('🔍 Validating environment variables...');
         
@@ -668,10 +1111,10 @@ class WhatsAppFinancialBot {
             // Start WhatsApp client with retry mechanism
             await this.initializeWhatsAppWithRetry();
             
-            // Start Express server
-            const port = process.env.PORT || 3000;
-            this.app.listen(port, () => {
-                this.logger.info(`🌐 Express server running on port ${port}`);
+            // Start Express server with proper PORT handling
+            this.app.listen(this.port, () => {
+                this.logger.info(`🌐 Express server running on port ${this.port}`);
+                this.logger.info(`🔗 Server accessible at: http://localhost:${this.port}`);
             });
 
         } catch (error) {
@@ -807,7 +1250,7 @@ class WhatsAppFinancialBot {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            this.logger.info('📱 QR Code generated. Scan with WhatsApp:');
+            this.logger.info('📱 QR Code generated. Scan with WhatsApp via Dashboard:');
             
             // Convert QR to base64 for web service
             const QRCode = require('qrcode');
@@ -817,13 +1260,15 @@ class WhatsAppFinancialBot {
                 this.currentQRCode = base64Data;
                 this.isWhatsAppConnected = false;
                 
-                // Display full URL with domain
-                const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-                const qrUrl = `${baseUrl}/qrscan`;
+                // Display dashboard URL instead of old qrscan URL
+                const baseUrl = process.env.BASE_URL || `http://localhost:${this.port}`;
+                const dashboardUrl = `${baseUrl}/dashboard`;
                 
-                this.logger.info(`🌐 QR Code available at: ${qrUrl}`);
-                this.logger.info(`📱 Open this URL in your browser to scan QR code:`);
-                this.logger.info(`   ${qrUrl}`);
+                this.logger.info(`🌐 QR Code available in Dashboard: ${dashboardUrl}`);
+                this.logger.info(`📱 Login to dashboard and go to QR Scan section to scan QR code`);
+                this.logger.info(`   Dashboard URL: ${dashboardUrl}`);
+                this.logger.info(`   Username: ${process.env.DASHBOARD_USERNAME || 'admin'}`);
+                this.logger.info(`   Password: ${process.env.DASHBOARD_PASSWORD || 'admin123'}`);
             } catch (qrError) {
                 this.logger.error('Error generating QR for web:', qrError);
             }

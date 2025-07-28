@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot WhatsApp Keuangan - AI Assistant Indonesia</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <i class="fas fa-robot"></i>
+                <span>FinanceBot</span>
+            </div>
+            <div class="nav-menu">
+                <a href="#home" class="nav-link active">Home</a>
+                <a href="#features" class="nav-link">Fitur</a>
+                <a href="#pricing" class="nav-link">Paket</a>
+                <a href="#qr-section" class="nav-link">Scan QR</a>
+                <a href="/login" class="nav-link login-btn">Dashboard</a>
+            </div>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    🤖 Bot WhatsApp <span class="gradient-text">Keuangan</span>
+                    <br>dengan AI Indonesia
+                </h1>
+                <p class="hero-subtitle">
+                    Kelola keuangan personal Anda dengan mudah melalui WhatsApp. 
+                    Dilengkapi AI Assistant berbahasa Indonesia yang cerdas dan fitur anti-spam.
+                </p>
+                <div class="hero-buttons">
+                    <a href="#qr-section" class="btn btn-primary">
+                        <i class="fas fa-qrcode"></i>
+                        Mulai Sekarang
+                    </a>
+                    <a href="#features" class="btn btn-secondary">
+                        <i class="fas fa-play"></i>
+                        Lihat Fitur
+                    </a>
+                </div>
+                <div class="hero-stats">
+                    <div class="stat">
+                        <div class="stat-number" data-target="1000">0</div>
+                        <div class="stat-label">Users Aktif</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number" data-target="50000">0</div>
+                        <div class="stat-label">Transaksi</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number" data-target="99">0</div>
+                        <div class="stat-label">% Uptime</div>
+                    </div>
+                </div>
+            </div>
+            <div class="hero-image">
+                <div class="phone-mockup">
+                    <div class="phone-screen">
+                        <div class="chat-bubble bot">
+                            <i class="fas fa-robot"></i>
+                            Halo! Saya siap membantu mengelola keuangan Anda 💰
+                        </div>
+                        <div class="chat-bubble user">
+                            Saya habis 50000 untuk makan siang
+                        </div>
+                        <div class="chat-bubble bot">
+                            ✅ Transaksi berhasil dicatat!<br>
+                            📊 Pengeluaran: Rp 50.000<br>
+                            🏷️ Kategori: Makanan
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2>🌟 Fitur Unggulan</h2>
+                <p>Bot keuangan terlengkap dengan teknologi AI terdepan</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <h3>🇮🇩 AI Assistant Indonesia</h3>
+                    <p>Sistem AI yang memahami bahasa Indonesia dengan sempurna. Parsing otomatis "10K", "1.5jt", "25rb" dengan akurat.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>📊 Analisis Keuangan Cerdas</h3>
+                    <p>Laporan otomatis, prediksi cash flow dengan Monte Carlo simulation, dan saran finansial personal.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <h3>💰 Kelola Hutang Piutang</h3>
+                    <p>Track hutang dan piutang dengan mudah. Auto-detect dari chat natural, kelola kontak debitur otomatis.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-heart"></i>
+                    </div>
+                    <h3>💭 AI Curhat Mode</h3>
+                    <p>Mode AI companion untuk dukungan emosional. Dilengkapi Text-to-Speech untuk respons suara natural.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>🛡️ Anti-Spam Protection</h3>
+                    <p>Sistem canggih mencegah banned WhatsApp. Natural typing simulation dan adaptive throttling.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-api"></i>
+                    </div>
+                    <h3>📡 REST API Integration</h3>
+                    <p>Webhook support untuk payment gateway, broadcast messages, dan integrasi sistem eksternal.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works">
+        <div class="container">
+            <div class="section-header">
+                <h2>🚀 Cara Kerja</h2>
+                <p>3 langkah mudah untuk mulai mengelola keuangan</p>
+            </div>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>📱 Scan QR Code</h3>
+                        <p>Scan QR code di bawah dengan WhatsApp untuk terhubung</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>👤 Registrasi Otomatis</h3>
+                        <p>AI Assistant akan memandu registrasi 3 langkah dengan ramah</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>💰 Mulai Chat</h3>
+                        <p>Langsung chat natural: "saya habis 50000 untuk makan siang"</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing" class="pricing">
+        <div class="container">
+            <div class="section-header">
+                <h2>💎 Paket Berlangganan</h2>
+                <p>Pilih paket yang sesuai dengan kebutuhan Anda</p>
+            </div>
+            <div class="pricing-cards">
+                <div class="pricing-card">
+                    <div class="pricing-header">
+                        <h3>🆓 Free Plan</h3>
+                        <div class="price">
+                            <span class="currency">Rp</span>
+                            <span class="amount">0</span>
+                            <span class="period">/bulan</span>
+                        </div>
+                    </div>
+                    <div class="pricing-features">
+                        <div class="feature">✅ 10 transaksi/bulan</div>
+                        <div class="feature">✅ Fitur dasar pencatatan</div>
+                        <div class="feature">✅ Laporan mingguan</div>
+                        <div class="feature">✅ AI Assistant</div>
+                        <div class="feature">❌ Unlimited transaksi</div>
+                        <div class="feature">❌ Analisis mendalam</div>
+                        <div class="feature">❌ Export data</div>
+                    </div>
+                    <button class="btn btn-outline">Mulai Gratis</button>
+                </div>
+                <div class="pricing-card featured">
+                    <div class="featured-badge">⭐ Populer</div>
+                    <div class="pricing-header">
+                        <h3>💎 Premium Plan</h3>
+                        <div class="price">
+                            <span class="currency">Rp</span>
+                            <span class="amount">50.000</span>
+                            <span class="period">/bulan</span>
+                        </div>
+                    </div>
+                    <div class="pricing-features">
+                        <div class="feature">✅ Unlimited transaksi</div>
+                        <div class="feature">✅ Semua fitur lengkap</div>
+                        <div class="feature">✅ Analisis AI mendalam</div>
+                        <div class="feature">✅ Hutang & Piutang</div>
+                        <div class="feature">✅ AI Curhat + TTS</div>
+                        <div class="feature">✅ Export CSV</div>
+                        <div class="feature">✅ Priority support</div>
+                    </div>
+                    <button class="btn btn-primary">Upgrade Premium</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- QR Code Section -->
+    <section id="qr-section" class="qr-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>📱 Scan untuk Memulai</h2>
+                <p>Scan QR code ini dengan WhatsApp untuk langsung terhubung</p>
+            </div>
+            <div class="qr-container">
+                <div id="qr-display" class="qr-display">
+                    <div class="qr-loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <p>Memuat QR Code...</p>
+                    </div>
+                </div>
+                <div id="connection-status" class="connection-status">
+                    <div class="status-indicator waiting">
+                        <i class="fas fa-clock"></i>
+                        <span>Menunggu koneksi WhatsApp...</span>
+                    </div>
+                </div>
+                <button id="refresh-qr" class="btn btn-secondary">
+                    <i class="fas fa-refresh"></i>
+                    Refresh QR Code
+                </button>
+            </div>
+            <div class="qr-instructions">
+                <h3>📋 Cara Scan:</h3>
+                <ol>
+                    <li>Buka <strong>WhatsApp</strong> di HP Anda</li>
+                    <li>Ketuk <strong>titik tiga</strong> → <strong>"Perangkat Tertaut"</strong></li>
+                    <li>Ketuk <strong>"Tautkan Perangkat"</strong></li>
+                    <li><strong>Scan QR code</strong> di atas</li>
+                    <li>Mulai chat untuk registrasi otomatis! 🎉</li>
+                </ol>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="footer-logo">
+                        <i class="fas fa-robot"></i>
+                        <span>FinanceBot</span>
+                    </div>
+                    <p>Bot WhatsApp keuangan terdepan dengan AI Indonesia untuk kemudahan pengelolaan finansial personal.</p>
+                    <div class="social-links">
+                        <a href="#"><i class="fab fa-github"></i></a>
+                        <a href="#"><i class="fab fa-whatsapp"></i></a>
+                        <a href="#"><i class="fab fa-telegram"></i></a>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h3>🔗 Quick Links</h3>
+                    <ul>
+                        <li><a href="#features">Fitur</a></li>
+                        <li><a href="#pricing">Paket</a></li>
+                        <li><a href="/qrscan">QR Code</a></li>
+                        <li><a href="/login">Dashboard</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3>📋 Dokumentasi</h3>
+                    <ul>
+                        <li><a href="#" target="_blank">API Docs</a></li>
+                        <li><a href="#" target="_blank">User Manual</a></li>
+                        <li><a href="#" target="_blank">GitHub</a></li>
+                        <li><a href="#" target="_blank">Support</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3>📞 Kontak</h3>
+                    <ul>
+                        <li><i class="fas fa-envelope"></i> support@financebot.id</li>
+                        <li><i class="fas fa-phone"></i> +62 xxx xxxx xxxx</li>
+                        <li><i class="fas fa-map-marker-alt"></i> Indonesia</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 WhatsApp Finance Bot. Made with ❤️ for better financial management.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

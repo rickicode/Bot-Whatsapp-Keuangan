@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Bot WhatsApp Keuangan</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <span>FinanceBot</span>
+                </div>
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="active">
+                        <a href="#overview" data-section="overview">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Overview</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#whatsapp" data-section="whatsapp">
+                            <i class="fab fa-whatsapp"></i>
+                            <span>WhatsApp Status</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#qrscan" data-section="qrscan">
+                            <i class="fas fa-qrcode"></i>
+                            <span>QR Scan</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#users" data-section="users">
+                            <i class="fas fa-users"></i>
+                            <span>User Statistics</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#system" data-section="system">
+                            <i class="fas fa-server"></i>
+                            <span>System Monitor</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#api" data-section="api">
+                            <i class="fas fa-code"></i>
+                            <span>API Stats</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#logs" data-section="logs">
+                            <i class="fas fa-file-alt"></i>
+                            <span>Activity Logs</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button class="logout-btn" id="logoutBtn">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="dashboard-header">
+                <div class="header-left">
+                    <h1 id="pageTitle">Dashboard Overview</h1>
+                    <p id="pageSubtitle">Monitor status dan statistik bot secara real-time</p>
+                </div>
+                <div class="header-right">
+                    <div class="last-updated">
+                        <i class="fas fa-clock"></i>
+                        <span id="lastUpdated">Loading...</span>
+                    </div>
+                    <button class="refresh-btn" id="refreshBtn">
+                        <i class="fas fa-sync-alt"></i>
+                        Refresh
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Sections -->
+            
+            <!-- Overview Section -->
+            <section id="overview-section" class="content-section active">
+                <div class="stats-grid">
+                    <div class="stat-card whatsapp">
+                        <div class="stat-icon">
+                            <i class="fab fa-whatsapp"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>WhatsApp Status</h3>
+                            <div class="stat-value" id="whatsappStatus">
+                                <span class="status-indicator loading"></span>
+                                <span>Checking...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card users">
+                        <div class="stat-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>Total Users</h3>
+                            <div class="stat-value" id="totalUsers">
+                                <span class="number">-</span>
+                                <span class="label">registered</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card messages">
+                        <div class="stat-icon">
+                            <i class="fas fa-comments"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>Messages Today</h3>
+                            <div class="stat-value" id="messagesToday">
+                                <span class="number">-</span>
+                                <span class="label">messages</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card uptime">
+                        <div class="stat-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3>System Uptime</h3>
+                            <div class="stat-value" id="systemUptime">
+                                <span class="number">-</span>
+                                <span class="label">hours</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="charts-row">
+                    <div class="chart-card">
+                        <h3>📊 User Growth (7 Days)</h3>
+                        <canvas id="userGrowthChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>💬 Message Volume (24 Hours)</h3>
+                        <canvas id="messageVolumeChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="quick-actions">
+                    <h3>⚡ Quick Actions</h3>
+                    <div class="action-buttons">
+                        <button class="action-btn restart-whatsapp" id="restartWhatsApp">
+                            <i class="fab fa-whatsapp"></i>
+                            Restart WhatsApp
+                        </button>
+                        <button class="action-btn clear-cache" id="clearCache">
+                            <i class="fas fa-broom"></i>
+                            Clear Cache
+                        </button>
+                        <button class="action-btn export-data" id="exportData">
+                            <i class="fas fa-download"></i>
+                            Export Data
+                        </button>
+                        <button class="action-btn view-logs" id="viewLogs">
+                            <i class="fas fa-file-alt"></i>
+                            View Logs
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- WhatsApp Section -->
+            <section id="whatsapp-section" class="content-section">
+                <div class="whatsapp-status-card">
+                    <div class="connection-info">
+                        <div class="connection-status" id="connectionStatus">
+                            <span class="status-indicator loading"></span>
+                            <span class="status-text">Checking connection...</span>
+                        </div>
+                        <div class="phone-info" id="phoneInfo">
+                            <i class="fas fa-phone"></i>
+                            <span>Phone: Loading...</span>
+                        </div>
+                        <div class="session-info" id="sessionInfo">
+                            <i class="fas fa-clock"></i>
+                            <span>Connected: Loading...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="qr-section" id="qrSection" style="display: none;">
+                        <h3>🔗 QR Code for Connection</h3>
+                        <div class="qr-display" id="qrDisplay">
+                            <div class="qr-loading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading QR Code...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="whatsapp-metrics">
+                    <div class="metric-card">
+                        <h4>📨 Messages Sent</h4>
+                        <div class="metric-value" id="messagesSent">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <h4>📥 Messages Received</h4>
+                        <div class="metric-value" id="messagesReceived">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <h4>⚠️ Failed Messages</h4>
+                        <div class="metric-value error" id="failedMessages">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <h4>🛡️ Spam Blocked</h4>
+                        <div class="metric-value warning" id="spamBlocked">-</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- QR Scan Section -->
+            <section id="qrscan-section" class="content-section">
+                <div class="qr-scan-container">
+                    <div class="qr-status-card">
+                        <div class="qr-header">
+                            <h3>📱 WhatsApp QR Code Scanner</h3>
+                            <p>Scan QR code dengan WhatsApp untuk menghubungkan bot</p>
+                        </div>
+                        
+                        <div class="connection-status-bar" id="qrConnectionStatus">
+                            <div class="status-indicator loading"></div>
+                            <span class="status-text">Checking connection status...</span>
+                        </div>
+                        
+                        <div class="qr-main-content">
+                            <div class="qr-code-container" id="qrCodeContainer">
+                                <div class="qr-placeholder" id="qrPlaceholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <h4>Loading QR Code...</h4>
+                                    <p>Please wait while we generate the QR code</p>
+                                </div>
+                                
+                                <div class="qr-code-display" id="qrCodeDisplay" style="display: none;">
+                                    <img id="qrCodeImage" src="" alt="QR Code">
+                                    <div class="qr-timer" id="qrTimer">
+                                        <i class="fas fa-clock"></i>
+                                        <span>QR Code expires in: <span id="qrCountdown">120</span>s</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="qr-connected" id="qrConnected" style="display: none;">
+                                    <div class="success-icon">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                    <h4>✅ WhatsApp Connected!</h4>
+                                    <p>Bot successfully connected to WhatsApp</p>
+                                    <div class="connected-info" id="connectedInfo">
+                                        <div class="info-item">
+                                            <i class="fas fa-phone"></i>
+                                            <span id="connectedPhone">+62xxx-xxxx-xxxx</span>
+                                        </div>
+                                        <div class="info-item">
+                                            <i class="fas fa-clock"></i>
+                                            <span>Connected: <span id="connectedTime">-</span></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="qr-error" id="qrError" style="display: none;">
+                                    <div class="error-icon">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                    </div>
+                                    <h4>❌ Connection Failed</h4>
+                                    <p id="qrErrorMessage">Failed to generate QR code. Please try again.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="qr-instructions">
+                                <h4>📋 How to Connect:</h4>
+                                <ol>
+                                    <li>
+                                        <i class="fab fa-whatsapp"></i>
+                                        Open WhatsApp on your phone
+                                    </li>
+                                    <li>
+                                        <i class="fas fa-ellipsis-vertical"></i>
+                                        Tap Menu (⋮) or Settings
+                                    </li>
+                                    <li>
+                                        <i class="fas fa-link"></i>
+                                        Select "Linked Devices"
+                                    </li>
+                                    <li>
+                                        <i class="fas fa-plus"></i>
+                                        Tap "Link a Device"
+                                    </li>
+                                    <li>
+                                        <i class="fas fa-camera"></i>
+                                        Point your phone at this QR code
+                                    </li>
+                                </ol>
+                            </div>
+                        </div>
+                        
+                        <div class="qr-actions">
+                            <button class="btn btn-primary" id="refreshQrBtn">
+                                <i class="fas fa-sync-alt"></i>
+                                Refresh QR Code
+                            </button>
+                            <button class="btn btn-secondary" id="checkConnectionBtn">
+                                <i class="fas fa-check"></i>
+                                Check Connection
+                            </button>
+                            <button class="btn btn-warning" id="disconnectBtn" style="display: none;">
+                                <i class="fas fa-unlink"></i>
+                                Disconnect
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="qr-info-cards">
+                        <div class="info-card">
+                            <div class="info-icon">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>🔒 Secure Connection</h4>
+                                <p>QR code is encrypted and expires automatically for security</p>
+                            </div>
+                        </div>
+                        
+                        <div class="info-card">
+                            <div class="info-icon">
+                                <i class="fas fa-sync"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>🔄 Auto Reconnect</h4>
+                                <p>Bot will automatically reconnect if connection is lost</p>
+                            </div>
+                        </div>
+                        
+                        <div class="info-card">
+                            <div class="info-icon">
+                                <i class="fas fa-mobile-alt"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>📱 Multi-Device</h4>
+                                <p>Works with WhatsApp Business and regular WhatsApp</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Users Section -->
+            <section id="users-section" class="content-section">
+                <div class="user-stats">
+                    <div class="user-stat-card">
+                        <h4>👥 Total Registered Users</h4>
+                        <div class="big-number" id="totalRegisteredUsers">-</div>
+                        <div class="stat-trend" id="userTrend">-</div>
+                    </div>
+                    <div class="user-stat-card">
+                        <h4>🆓 Free Plan Users</h4>
+                        <div class="big-number" id="freePlanUsers">-</div>
+                        <div class="stat-percentage" id="freePercentage">-</div>
+                    </div>
+                    <div class="user-stat-card">
+                        <h4>💎 Premium Users</h4>
+                        <div class="big-number" id="premiumUsers">-</div>
+                        <div class="stat-percentage" id="premiumPercentage">-</div>
+                    </div>
+                    <div class="user-stat-card">
+                        <h4>📈 Active This Week</h4>
+                        <div class="big-number" id="activeThisWeek">-</div>
+                        <div class="stat-trend" id="activeTrend">-</div>
+                    </div>
+                </div>
+                
+                <div class="user-chart-container">
+                    <h3>📊 User Activity Distribution</h3>
+                    <canvas id="userActivityChart"></canvas>
+                </div>
+                
+                <div class="recent-users">
+                    <h3>👋 Recent Registrations</h3>
+                    <div class="user-list" id="recentUsersList">
+                        <div class="loading-placeholder">Loading recent users...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- System Section -->
+            <section id="system-section" class="content-section">
+                <div class="system-overview">
+                    <div class="system-card">
+                        <h4>💾 Memory Usage</h4>
+                        <div class="progress-circle" id="memoryUsage">
+                            <span>-</span>
+                        </div>
+                    </div>
+                    <div class="system-card">
+                        <h4>🗄️ Database Status</h4>
+                        <div class="status-badge" id="databaseStatus">
+                            <span class="badge loading">Checking...</span>
+                        </div>
+                    </div>
+                    <div class="system-card">
+                        <h4>🔧 Active Services</h4>
+                        <div class="service-count" id="activeServices">
+                            <span class="number">-</span>
+                            <span class="total">/7</span>
+                        </div>
+                    </div>
+                    <div class="system-card">
+                        <h4>⚠️ Error Rate</h4>
+                        <div class="error-rate" id="errorRate">
+                            <span>-%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="service-status">
+                    <h3>🔧 Service Status</h3>
+                    <div class="service-list" id="serviceList">
+                        <div class="loading-placeholder">Loading service status...</div>
+                    </div>
+                </div>
+                
+                <div class="system-logs">
+                    <h3>📋 Recent System Events</h3>
+                    <div class="log-container" id="systemLogs">
+                        <div class="loading-placeholder">Loading system logs...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- API Section -->
+            <section id="api-section" class="content-section">
+                <div class="api-overview">
+                    <div class="api-stat-card">
+                        <h4>📡 API Calls Today</h4>
+                        <div class="big-number" id="apiCallsToday">-</div>
+                    </div>
+                    <div class="api-stat-card">
+                        <h4>✅ Success Rate</h4>
+                        <div class="big-number success" id="apiSuccessRate">-%</div>
+                    </div>
+                    <div class="api-stat-card">
+                        <h4>⚡ Avg Response Time</h4>
+                        <div class="big-number" id="avgResponseTime">-ms</div>
+                    </div>
+                    <div class="api-stat-card">
+                        <h4>🚫 Rate Limited</h4>
+                        <div class="big-number warning" id="rateLimited">-</div>
+                    </div>
+                </div>
+                
+                <div class="api-endpoints">
+                    <h3>🔗 API Endpoints Usage</h3>
+                    <div class="endpoint-list" id="endpointList">
+                        <div class="loading-placeholder">Loading API statistics...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Logs Section -->
+            <section id="logs-section" class="content-section">
+                <div class="logs-header">
+                    <h3>📋 Activity Logs</h3>
+                    <div class="log-controls">
+                        <select id="logLevel">
+                            <option value="all">All Levels</option>
+                            <option value="error">Errors</option>
+                            <option value="warn">Warnings</option>
+                            <option value="info">Info</option>
+                            <option value="debug">Debug</option>
+                        </select>
+                        <select id="logSource">
+                            <option value="all">All Sources</option>
+                            <option value="whatsapp">WhatsApp</option>
+                            <option value="api">API</option>
+                            <option value="database">Database</option>
+                            <option value="system">System</option>
+                        </select>
+                        <button class="clear-logs-btn" id="clearLogsBtn">
+                            <i class="fas fa-trash"></i>
+                            Clear Logs
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="logs-container" id="logsContainer">
+                    <div class="loading-placeholder">Loading activity logs...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading dashboard data...</p>
+        </div>
+    </div>
+
+    <!-- Modal for Actions -->
+    <div class="modal" id="actionModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Confirm Action</h3>
+                <button class="modal-close" id="modalClose">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <p>Are you sure you want to perform this action?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+                <button class="btn btn-primary" id="modalConfirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
