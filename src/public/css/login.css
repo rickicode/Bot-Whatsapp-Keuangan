@@ -1,150 +1,257 @@
-/* Login Page Styles */
+/* Modern Material Design 3 Login Page */
 :root {
-    --primary-color: #667eea;
-    --secondary-color: #764ba2;
-    --accent-color: #f093fb;
-    --success-color: #4ade80;
-    --warning-color: #fbbf24;
-    --danger-color: #ef4444;
-    --dark-color: #1f2937;
-    --light-color: #f8fafc;
-    --text-color: #374151;
-    --text-light: #6b7280;
-    --border-color: #e5e7eb;
-    --shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.15);
-    --transition: all 0.3s ease;
-    --border-radius: 12px;
-    --border-radius-lg: 20px;
+    /* Material Design 3 Color Tokens */
+    --md-sys-color-primary: #6750A4;
+    --md-sys-color-on-primary: #FFFFFF;
+    --md-sys-color-primary-container: #EADDFF;
+    --md-sys-color-on-primary-container: #21005D;
+    
+    --md-sys-color-secondary: #625B71;
+    --md-sys-color-on-secondary: #FFFFFF;
+    --md-sys-color-secondary-container: #E8DEF8;
+    --md-sys-color-on-secondary-container: #1D192B;
+    
+    --md-sys-color-surface: #FFFBFE;
+    --md-sys-color-surface-variant: #F7F2FA;
+    --md-sys-color-on-surface: #1D1B20;
+    --md-sys-color-on-surface-variant: #49454F;
+    
+    --md-sys-color-background: #FFFBFE;
+    --md-sys-color-on-background: #1D1B20;
+    
+    --md-sys-color-outline: #79747E;
+    --md-sys-color-outline-variant: #CAC4D0;
+    
+    --md-sys-color-error: #BA1A1A;
+    --md-sys-color-on-error: #FFFFFF;
+    --md-sys-color-error-container: #FFDAD6;
+    --md-sys-color-on-error-container: #410002;
+    
+    /* Material Design 3 Elevation Tokens */
+    --md-sys-elevation-level0: none;
+    --md-sys-elevation-level1: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-level2: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-level3: 0px 1px 3px 0px rgba(0, 0, 0, 0.3), 0px 4px 8px 3px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-level4: 0px 2px 3px 0px rgba(0, 0, 0, 0.3), 0px 6px 10px 4px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-level5: 0px 4px 4px 0px rgba(0, 0, 0, 0.3), 0px 8px 12px 6px rgba(0, 0, 0, 0.15);
+    
+    /* Material Design 3 Shape Tokens */
+    --md-sys-shape-corner-none: 0px;
+    --md-sys-shape-corner-extra-small: 4px;
+    --md-sys-shape-corner-small: 8px;
+    --md-sys-shape-corner-medium: 12px;
+    --md-sys-shape-corner-large: 16px;
+    --md-sys-shape-corner-extra-large: 28px;
+    
+    /* Material Design 3 Typography Scale */
+    --md-sys-typescale-display-large-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-display-large-size: 57px;
+    --md-sys-typescale-display-large-weight: 400;
+    --md-sys-typescale-display-large-line-height: 64px;
+    
+    --md-sys-typescale-headline-large-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-headline-large-size: 32px;
+    --md-sys-typescale-headline-large-weight: 400;
+    --md-sys-typescale-headline-large-line-height: 40px;
+    
+    --md-sys-typescale-headline-medium-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-headline-medium-size: 28px;
+    --md-sys-typescale-headline-medium-weight: 400;
+    --md-sys-typescale-headline-medium-line-height: 36px;
+    
+    --md-sys-typescale-title-large-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-title-large-size: 22px;
+    --md-sys-typescale-title-large-weight: 400;
+    --md-sys-typescale-title-large-line-height: 28px;
+    
+    --md-sys-typescale-body-large-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-body-large-size: 16px;
+    --md-sys-typescale-body-large-weight: 400;
+    --md-sys-typescale-body-large-line-height: 24px;
+    
+    --md-sys-typescale-body-medium-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-body-medium-size: 14px;
+    --md-sys-typescale-body-medium-weight: 400;
+    --md-sys-typescale-body-medium-line-height: 20px;
+    
+    --md-sys-typescale-label-large-font: 'Inter', system-ui, sans-serif;
+    --md-sys-typescale-label-large-size: 14px;
+    --md-sys-typescale-label-large-weight: 500;
+    --md-sys-typescale-label-large-line-height: 20px;
+    
+    /* Motion Tokens */
+    --md-sys-motion-duration-short1: 50ms;
+    --md-sys-motion-duration-short2: 100ms;
+    --md-sys-motion-duration-short3: 150ms;
+    --md-sys-motion-duration-short4: 200ms;
+    --md-sys-motion-duration-medium1: 250ms;
+    --md-sys-motion-duration-medium2: 300ms;
+    --md-sys-motion-duration-medium3: 350ms;
+    --md-sys-motion-duration-medium4: 400ms;
+    --md-sys-motion-duration-long1: 450ms;
+    --md-sys-motion-duration-long2: 500ms;
+    --md-sys-motion-duration-long3: 550ms;
+    --md-sys-motion-duration-long4: 600ms;
+    
+    --md-sys-motion-easing-linear: cubic-bezier(0, 0, 1, 1);
+    --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+    --md-sys-motion-easing-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+    --md-sys-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+    --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+    --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+    --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
 }
 
+/* Reset and Base Styles */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+html {
+    font-size: 16px;
+    color-scheme: light;
+}
+
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    font-family: var(--md-sys-typescale-body-large-font);
+    font-size: var(--md-sys-typescale-body-large-size);
+    font-weight: var(--md-sys-typescale-body-large-weight);
+    line-height: var(--md-sys-typescale-body-large-line-height);
+    color: var(--md-sys-color-on-background);
+    background-color: var(--md-sys-color-background);
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 20px;
-    position: relative;
-    overflow: hidden;
+    padding: 24px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
+/* Login Container */
 .login-container {
     width: 100%;
-    max-width: 450px;
+    max-width: 400px;
     position: relative;
-    z-index: 10;
 }
 
+/* Material Design 3 Card */
 .login-card {
-    background: white;
-    border-radius: var(--border-radius-lg);
-    box-shadow: var(--shadow-lg);
+    background-color: var(--md-sys-color-surface);
+    border-radius: var(--md-sys-shape-corner-large);
+    box-shadow: var(--md-sys-elevation-level2);
     overflow: hidden;
-    animation: slideInUp 0.6s ease-out;
+    animation: enter var(--md-sys-motion-duration-medium4) var(--md-sys-motion-easing-emphasized-decelerate);
 }
 
-@keyframes slideInUp {
+@keyframes enter {
     from {
         opacity: 0;
-        transform: translateY(30px);
+        transform: translateY(16px) scale(0.95);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
     }
 }
 
+/* Header Section */
 .login-header {
+    padding: 32px 24px 24px;
     text-align: center;
-    padding: 3rem 2rem 2rem;
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    color: white;
-    position: relative;
-}
-
-.login-header::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 20px;
-    background: white;
-    border-radius: 20px 20px 0 0;
+    background-color: var(--md-sys-color-surface);
 }
 
 .logo {
-    margin-bottom: 1rem;
+    margin-bottom: 16px;
 }
 
 .logo i {
-    font-size: 3rem;
-    margin-bottom: 1rem;
+    font-size: 48px;
+    color: var(--md-sys-color-primary);
+    margin-bottom: 16px;
     display: block;
-    opacity: 0.9;
 }
 
 .logo h1 {
-    font-size: 1.8rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
+    font-family: var(--md-sys-typescale-headline-medium-font);
+    font-size: var(--md-sys-typescale-headline-medium-size);
+    font-weight: var(--md-sys-typescale-headline-medium-weight);
+    line-height: var(--md-sys-typescale-headline-medium-line-height);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: 8px;
 }
 
 .subtitle {
-    font-size: 1rem;
-    opacity: 0.9;
-    line-height: 1.5;
+    font-family: var(--md-sys-typescale-body-medium-font);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    font-weight: var(--md-sys-typescale-body-medium-weight);
+    line-height: var(--md-sys-typescale-body-medium-line-height);
+    color: var(--md-sys-color-on-surface-variant);
 }
 
+/* Form Section */
 .login-form {
-    padding: 2rem;
+    padding: 8px 24px 24px;
 }
 
 .form-group {
-    margin-bottom: 1.5rem;
+    margin-bottom: 24px;
 }
 
+/* Material Design 3 Text Field Labels */
 .form-group label {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: 600;
-    color: var(--text-color);
-    margin-bottom: 0.5rem;
-    font-size: 0.9rem;
+    font-family: var(--md-sys-typescale-body-medium-font);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    font-weight: var(--md-sys-typescale-body-medium-weight);
+    line-height: var(--md-sys-typescale-body-medium-line-height);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: 8px;
 }
 
 .form-group label i {
-    font-size: 1rem;
-    color: var(--primary-color);
+    font-size: 18px;
+    color: var(--md-sys-color-on-surface-variant);
 }
 
+/* Material Design 3 Outlined Text Fields */
 .form-group input[type="text"],
 .form-group input[type="password"] {
     width: 100%;
-    padding: 12px 16px;
-    border: 2px solid var(--border-color);
-    border-radius: var(--border-radius);
-    font-size: 1rem;
-    transition: var(--transition);
-    background: white;
-    color: var(--text-color);
+    padding: 16px;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    background-color: var(--md-sys-color-surface);
+    color: var(--md-sys-color-on-surface);
+    font-family: var(--md-sys-typescale-body-large-font);
+    font-size: var(--md-sys-typescale-body-large-size);
+    font-weight: var(--md-sys-typescale-body-large-weight);
+    line-height: var(--md-sys-typescale-body-large-line-height);
+    transition: all var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+.form-group input:hover {
+    border-color: var(--md-sys-color-on-surface);
 }
 
 .form-group input:focus {
     outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    border-color: var(--md-sys-color-primary);
+    border-width: 2px;
+    padding: 15px; /* Adjust padding to compensate for thicker border */
 }
 
+.form-group input::placeholder {
+    color: var(--md-sys-color-on-surface-variant);
+    opacity: 0.6;
+}
+
+/* Password Input Container */
 .password-input {
     position: relative;
 }
@@ -156,28 +263,40 @@ body {
     transform: translateY(-50%);
     background: none;
     border: none;
-    color: var(--text-light);
+    color: var(--md-sys-color-on-surface-variant);
     cursor: pointer;
-    padding: 4px;
-    transition: var(--transition);
+    padding: 8px;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    transition: all var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard);
 }
 
 .password-toggle:hover {
-    color: var(--primary-color);
+    background-color: var(--md-sys-color-surface-variant);
+    color: var(--md-sys-color-on-surface);
 }
 
+.password-toggle:focus {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+}
+
+/* Material Design 3 Checkbox */
 .checkbox-group {
-    margin-bottom: 2rem;
+    margin-bottom: 32px;
 }
 
 .checkbox-label {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     cursor: pointer;
-    font-size: 0.9rem;
-    color: var(--text-color);
+    font-family: var(--md-sys-typescale-body-medium-font);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    font-weight: var(--md-sys-typescale-body-medium-weight);
+    line-height: var(--md-sys-typescale-body-medium-line-height);
+    color: var(--md-sys-color-on-surface);
     user-select: none;
+    padding: 4px 0;
 }
 
 .checkbox-label input[type="checkbox"] {
@@ -185,62 +304,85 @@ body {
 }
 
 .checkmark {
-    width: 18px;
-    height: 18px;
-    border: 2px solid var(--border-color);
-    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-extra-small);
     position: relative;
-    transition: var(--transition);
+    transition: all var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard);
+    flex-shrink: 0;
+}
+
+.checkbox-label:hover .checkmark {
+    border-color: var(--md-sys-color-on-surface);
 }
 
 .checkbox-label input:checked + .checkmark {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
+    background-color: var(--md-sys-color-primary);
+    border-color: var(--md-sys-color-primary);
 }
 
 .checkbox-label input:checked + .checkmark::after {
     content: '';
     position: absolute;
-    left: 5px;
+    left: 6px;
     top: 2px;
-    width: 5px;
+    width: 4px;
     height: 8px;
-    border: solid white;
+    border: solid var(--md-sys-color-on-primary);
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
 }
 
+.checkbox-label input:focus + .checkmark {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+}
+
+/* Material Design 3 Filled Button */
 .login-btn {
     width: 100%;
-    padding: 14px;
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    color: white;
+    padding: 16px 24px;
+    background-color: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
     border: none;
-    border-radius: var(--border-radius);
-    font-size: 1rem;
-    font-weight: 600;
+    border-radius: var(--md-sys-shape-corner-large);
+    font-family: var(--md-sys-typescale-label-large-font);
+    font-size: var(--md-sys-typescale-label-large-size);
+    font-weight: var(--md-sys-typescale-label-large-weight);
+    line-height: var(--md-sys-typescale-label-large-line-height);
     cursor: pointer;
-    transition: var(--transition);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    margin-bottom: 1rem;
+    margin-bottom: 16px;
+    transition: all var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard);
+    box-shadow: var(--md-sys-elevation-level1);
+    position: relative;
+    overflow: hidden;
 }
 
 .login-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--md-sys-elevation-level2);
+    background-color: color-mix(in srgb, var(--md-sys-color-primary) 92%, white);
+}
+
+.login-btn:focus {
+    outline: none;
+    box-shadow: var(--md-sys-elevation-level1), 0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent);
 }
 
 .login-btn:active {
-    transform: translateY(0);
+    background-color: color-mix(in srgb, var(--md-sys-color-primary) 88%, white);
+    box-shadow: var(--md-sys-elevation-level1);
 }
 
 .login-btn:disabled {
-    opacity: 0.6;
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
     cursor: not-allowed;
-    transform: none;
+    box-shadow: none;
 }
 
 .login-btn.loading {
@@ -248,7 +390,7 @@ body {
 }
 
 .login-btn.loading i {
-    animation: spin 1s linear infinite;
+    animation: spin var(--md-sys-motion-duration-long2) linear infinite;
 }
 
 @keyframes spin {
@@ -256,16 +398,38 @@ body {
     100% { transform: rotate(360deg); }
 }
 
+/* Material Design 3 Ripple Effect */
+.login-btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--md-sys-color-on-primary) 12%, transparent);
+    transform: translate(-50%, -50%);
+    transition: width var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard), 
+                height var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+.login-btn:active::before {
+    width: 300px;
+    height: 300px;
+}
+
+/* Message States */
 .login-message {
-    padding: 12px;
-    border-radius: var(--border-radius);
-    font-size: 0.9rem;
-    font-weight: 500;
-    text-align: center;
-    margin-top: 1rem;
+    padding: 12px 16px;
+    border-radius: var(--md-sys-shape-corner-small);
+    font-family: var(--md-sys-typescale-body-medium-font);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    font-weight: var(--md-sys-typescale-body-medium-weight);
+    line-height: var(--md-sys-typescale-body-medium-line-height);
+    margin-top: 16px;
     opacity: 0;
-    transform: translateY(-10px);
-    transition: var(--transition);
+    transform: translateY(-8px);
+    transition: all var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized-decelerate);
 }
 
 .login-message.show {
@@ -274,32 +438,29 @@ body {
 }
 
 .login-message.success {
-    background: #d4f6d4;
-    color: #2d5a2d;
-    border: 1px solid #a8e6a8;
+    background-color: color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent);
+    color: var(--md-sys-color-primary);
 }
 
 .login-message.error {
-    background: #fce8e8;
-    color: #8b2635;
-    border: 1px solid #f5a3a3;
+    background-color: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
 }
 
 .login-message.info {
-    background: #e8f4fd;
-    color: #1e5a8a;
-    border: 1px solid #a8d8f0;
+    background-color: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
 }
 
+/* Footer Section */
 .login-footer {
-    padding: 1.5rem 2rem 2rem;
-    background: var(--light-color);
-    border-top: 1px solid var(--border-color);
+    padding: 16px 24px 24px;
+    background-color: var(--md-sys-color-surface-variant);
 }
 
 .divider {
     text-align: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 16px;
     position: relative;
 }
 
@@ -310,56 +471,75 @@ body {
     left: 0;
     right: 0;
     height: 1px;
-    background: var(--border-color);
+    background-color: var(--md-sys-color-outline-variant);
 }
 
 .divider span {
-    background: var(--light-color);
-    padding: 0 1rem;
-    color: var(--text-light);
-    font-size: 0.9rem;
+    background-color: var(--md-sys-color-surface-variant);
+    padding: 0 16px;
+    color: var(--md-sys-color-on-surface-variant);
+    font-family: var(--md-sys-typescale-body-medium-font);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    font-weight: var(--md-sys-typescale-body-medium-weight);
+    line-height: var(--md-sys-typescale-body-medium-line-height);
     position: relative;
     z-index: 1;
 }
 
+/* Material Design 3 Text Button */
 .back-home {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 10px;
-    color: var(--primary-color);
+    padding: 10px 12px;
+    color: var(--md-sys-color-primary);
     text-decoration: none;
-    border-radius: var(--border-radius);
-    transition: var(--transition);
-    font-weight: 500;
-    margin-bottom: 1.5rem;
+    border-radius: var(--md-sys-shape-corner-large);
+    font-family: var(--md-sys-typescale-label-large-font);
+    font-size: var(--md-sys-typescale-label-large-size);
+    font-weight: var(--md-sys-typescale-label-large-weight);
+    line-height: var(--md-sys-typescale-label-large-line-height);
+    margin-bottom: 16px;
+    transition: background-color var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard);
 }
 
 .back-home:hover {
-    background: rgba(102, 126, 234, 0.1);
+    background-color: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent);
 }
 
+.back-home:focus {
+    outline: none;
+    background-color: color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent);
+}
+
+/* Info Card */
 .login-info {
-    background: white;
-    border-radius: var(--border-radius);
-    padding: 1.5rem;
-    border: 1px solid var(--border-color);
+    background-color: var(--md-sys-color-surface);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: 16px;
+    border: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .login-info h3 {
-    color: var(--text-color);
-    margin-bottom: 1rem;
-    font-size: 1rem;
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: 12px;
+    font-family: var(--md-sys-typescale-title-large-font);
+    font-size: 16px;
+    font-weight: var(--md-sys-typescale-title-large-weight);
+    line-height: var(--md-sys-typescale-title-large-line-height);
 }
 
 .info-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 0.8rem;
-    font-size: 0.85rem;
-    color: var(--text-light);
+    gap: 12px;
+    margin-bottom: 8px;
+    font-family: var(--md-sys-typescale-body-medium-font);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    font-weight: var(--md-sys-typescale-body-medium-weight);
+    line-height: var(--md-sys-typescale-body-medium-line-height);
+    color: var(--md-sys-color-on-surface-variant);
 }
 
 .info-item:last-child {
@@ -367,172 +547,105 @@ body {
 }
 
 .info-item i {
-    color: var(--primary-color);
+    color: var(--md-sys-color-primary);
     width: 16px;
     flex-shrink: 0;
 }
 
 .info-item code {
-    background: var(--light-color);
+    background-color: var(--md-sys-color-surface-variant);
+    color: var(--md-sys-color-primary);
     padding: 2px 6px;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-    color: var(--primary-color);
-    font-weight: 600;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 500;
 }
 
-/* Background Decoration */
+/* Remove Background Decorations for Clean Look */
 .background-decoration {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 1;
-}
-
-.circle {
-    position: absolute;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
-    animation: float 6s ease-in-out infinite;
-}
-
-.circle-1 {
-    width: 200px;
-    height: 200px;
-    top: 10%;
-    left: -50px;
-    animation-delay: 0s;
-}
-
-.circle-2 {
-    width: 150px;
-    height: 150px;
-    top: 70%;
-    right: -30px;
-    animation-delay: 2s;
-}
-
-.circle-3 {
-    width: 100px;
-    height: 100px;
-    top: 30%;
-    right: 20%;
-    animation-delay: 4s;
-}
-
-@keyframes float {
-    0%, 100% {
-        transform: translateY(0px) rotate(0deg);
-    }
-    50% {
-        transform: translateY(-20px) rotate(180deg);
-    }
+    display: none;
 }
 
 /* Responsive Design */
 @media (max-width: 480px) {
+    body {
+        padding: 16px;
+    }
+    
     .login-container {
-        padding: 10px;
+        max-width: 100%;
     }
     
     .login-header {
-        padding: 2rem 1.5rem 1.5rem;
+        padding: 24px 20px 20px;
     }
     
     .logo h1 {
-        font-size: 1.5rem;
+        font-size: 24px;
+        line-height: 32px;
     }
     
     .login-form {
-        padding: 1.5rem;
+        padding: 8px 20px 20px;
     }
     
     .login-footer {
-        padding: 1rem 1.5rem 1.5rem;
+        padding: 16px 20px 20px;
     }
     
     .login-info {
-        padding: 1rem;
-    }
-    
-    .circle-1 {
-        width: 120px;
-        height: 120px;
-    }
-    
-    .circle-2 {
-        width: 80px;
-        height: 80px;
-    }
-    
-    .circle-3 {
-        display: none;
+        padding: 12px;
     }
 }
 
-/* High contrast mode */
+/* High Contrast Mode Support */
 @media (prefers-contrast: high) {
     .form-group input {
-        border-width: 3px;
+        border-width: 2px;
     }
     
     .login-btn {
         border: 2px solid transparent;
     }
     
-    .background-decoration {
-        display: none;
+    .login-btn:focus {
+        border-color: var(--md-sys-color-on-primary);
     }
 }
 
-/* Reduced motion */
+/* Reduced Motion Support */
 @media (prefers-reduced-motion: reduce) {
     .login-card {
-        animation: none;
-    }
-    
-    .circle {
         animation: none;
     }
     
     .login-btn.loading i {
         animation: none;
     }
+    
+    * {
+        transition: none !important;
+    }
 }
 
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --light-color: #1f2937;
-        --text-color: #f3f4f6;
-        --text-light: #9ca3af;
-        --border-color: #374151;
+/* Focus Management */
+.login-form *:focus-visible {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+}
+
+/* Improve Touch Targets for Mobile */
+@media (max-width: 768px) {
+    .checkbox-label {
+        padding: 8px 0;
     }
     
-    .login-card {
-        background: #111827;
-        color: var(--text-color);
+    .password-toggle {
+        padding: 12px;
     }
     
-    .login-footer {
-        background: #1f2937;
-    }
-    
-    .login-info {
-        background: #1f2937;
-        border-color: #374151;
-    }
-    
-    .form-group input {
-        background: #1f2937;
-        border-color: #374151;
-        color: var(--text-color);
-    }
-    
-    .divider span {
-        background: #1f2937;
+    .login-btn {
+        padding: 18px 24px;
     }
 }

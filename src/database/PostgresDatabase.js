@@ -593,6 +593,91 @@ class PostgresDatabase extends BaseDatabase {
                 message_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
+            )`,
+
+            // Dashboard Stats Table - for storing daily/monthly aggregated statistics
+            `CREATE TABLE IF NOT EXISTS dashboard_stats (
+                id SERIAL PRIMARY KEY,
+                stat_date DATE NOT NULL,
+                stat_type VARCHAR(50) NOT NULL,
+                metric_name VARCHAR(100) NOT NULL,
+                metric_value NUMERIC(15,2) DEFAULT 0,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(stat_date, stat_type, metric_name)
+            )`,
+
+            // Message Logs Table - for tracking all WhatsApp messages
+            `CREATE TABLE IF NOT EXISTS message_logs (
+                id SERIAL PRIMARY KEY,
+                user_phone VARCHAR(20) NOT NULL,
+                message_type VARCHAR(20) CHECK(message_type IN ('incoming', 'outgoing')) NOT NULL,
+                message_content TEXT,
+                message_length INTEGER DEFAULT 0,
+                success BOOLEAN DEFAULT true,
+                error_message TEXT,
+                processing_time INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                message_date DATE DEFAULT CURRENT_DATE
+            )`,
+
+            // API Usage Logs Table - for tracking REST API usage
+            `CREATE TABLE IF NOT EXISTS api_usage_logs (
+                id SERIAL PRIMARY KEY,
+                endpoint VARCHAR(255) NOT NULL,
+                method VARCHAR(10) NOT NULL,
+                api_key_used VARCHAR(100),
+                request_ip VARCHAR(45),
+                response_status INTEGER,
+                response_time INTEGER,
+                success BOOLEAN DEFAULT true,
+                error_message TEXT,
+                request_size INTEGER DEFAULT 0,
+                response_size INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                request_date DATE DEFAULT CURRENT_DATE
+            )`,
+
+            // System Metrics Table - for storing system health metrics
+            `CREATE TABLE IF NOT EXISTS system_metrics (
+                id SERIAL PRIMARY KEY,
+                metric_type VARCHAR(50) NOT NULL,
+                metric_name VARCHAR(100) NOT NULL,
+                metric_value NUMERIC(15,4),
+                metric_unit VARCHAR(20),
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metric_date DATE DEFAULT CURRENT_DATE
+            )`,
+
+            // Activity Logs Table - for general activity logging
+            `CREATE TABLE IF NOT EXISTS activity_logs (
+                id SERIAL PRIMARY KEY,
+                user_phone VARCHAR(20),
+                activity_type VARCHAR(50) NOT NULL,
+                activity_description TEXT NOT NULL,
+                log_level VARCHAR(10) CHECK(log_level IN ('error', 'warn', 'info', 'debug')) DEFAULT 'info',
+                source VARCHAR(50) DEFAULT 'system',
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                activity_date DATE DEFAULT CURRENT_DATE
+            )`,
+
+            // WhatsApp Metrics Table - for specific WhatsApp metrics
+            `CREATE TABLE IF NOT EXISTS whatsapp_metrics (
+                id SERIAL PRIMARY KEY,
+                metric_date DATE DEFAULT CURRENT_DATE,
+                messages_sent INTEGER DEFAULT 0,
+                messages_received INTEGER DEFAULT 0,
+                messages_failed INTEGER DEFAULT 0,
+                spam_blocked INTEGER DEFAULT 0,
+                connection_uptime INTEGER DEFAULT 0,
+                qr_generated INTEGER DEFAULT 0,
+                session_restarts INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(metric_date)
             )`
         ];
 
@@ -628,7 +713,23 @@ class PostgresDatabase extends BaseDatabase {
                 'CREATE INDEX IF NOT EXISTS idx_curhat_history_user_phone ON curhat_history(user_phone)',
                 'CREATE INDEX IF NOT EXISTS idx_curhat_history_session ON curhat_history(user_phone, session_id)',
                 'CREATE INDEX IF NOT EXISTS idx_curhat_history_timestamp ON curhat_history(message_timestamp DESC)',
-                'CREATE INDEX IF NOT EXISTS idx_curhat_history_created_at ON curhat_history(created_at DESC)'
+                'CREATE INDEX IF NOT EXISTS idx_curhat_history_created_at ON curhat_history(created_at DESC)',
+                
+                // Indexes untuk Dashboard Statistics tables
+                'CREATE INDEX IF NOT EXISTS idx_dashboard_stats_date_type ON dashboard_stats(stat_date, stat_type)',
+                'CREATE INDEX IF NOT EXISTS idx_dashboard_stats_metric ON dashboard_stats(metric_name)',
+                'CREATE INDEX IF NOT EXISTS idx_message_logs_date_type ON message_logs(message_date, message_type)',
+                'CREATE INDEX IF NOT EXISTS idx_message_logs_user_phone ON message_logs(user_phone)',
+                'CREATE INDEX IF NOT EXISTS idx_message_logs_created_at ON message_logs(created_at DESC)',
+                'CREATE INDEX IF NOT EXISTS idx_api_usage_logs_date ON api_usage_logs(request_date)',
+                'CREATE INDEX IF NOT EXISTS idx_api_usage_logs_endpoint ON api_usage_logs(endpoint)',
+                'CREATE INDEX IF NOT EXISTS idx_api_usage_logs_status ON api_usage_logs(response_status)',
+                'CREATE INDEX IF NOT EXISTS idx_system_metrics_date_type ON system_metrics(metric_date, metric_type)',
+                'CREATE INDEX IF NOT EXISTS idx_system_metrics_name ON system_metrics(metric_name)',
+                'CREATE INDEX IF NOT EXISTS idx_activity_logs_date_level ON activity_logs(activity_date, log_level)',
+                'CREATE INDEX IF NOT EXISTS idx_activity_logs_source ON activity_logs(source)',
+                'CREATE INDEX IF NOT EXISTS idx_activity_logs_user_phone ON activity_logs(user_phone)',
+                'CREATE INDEX IF NOT EXISTS idx_whatsapp_metrics_date ON whatsapp_metrics(metric_date)'
             ];
 
             for (const index of indexes) {

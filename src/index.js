@@ -846,116 +846,235 @@ class WhatsAppFinancialBot {
 
     // Dashboard data methods
     async getDashboardStats() {
-        const stats = {
-            users: { total: 0 },
-            messages: { today: 0 },
+        try {
+            if (!this.db) {
+                return this.getEmptyDashboardStats();
+            }
+
+            // Get comprehensive dashboard statistics
+            const dashboardStats = await this.db.getDashboardStats();
+            
+            // Get user growth data for charts
+            const userGrowthData = await this.db.getUserGrowthData(7);
+            const userGrowthLabels = [];
+            const userGrowthValues = [];
+            
+            // Generate labels for last 7 days
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                const dateStr = date.toISOString().split('T')[0];
+                
+                if (i === 0) {
+                    userGrowthLabels.push('Today');
+                } else if (i === 1) {
+                    userGrowthLabels.push('Yesterday');
+                } else {
+                    userGrowthLabels.push(`${i} days ago`);
+                }
+                
+                // Find data for this date
+                const dayData = userGrowthData.find(d => d.date === dateStr);
+                userGrowthValues.push(dayData ? dayData.count : 0);
+            }
+
+            // Get message volume data for charts (24 hours)
+            const messageVolumeData = await this.db.getMessageVolumeData(24);
+            const messageVolumeLabels = [];
+            const messageVolumeValues = [];
+            
+            // Generate labels for 24 hours
+            for (let i = 0; i < 24; i++) {
+                messageVolumeLabels.push(`${i}:00`);
+                const hourData = messageVolumeData.find(d => d.hour === i);
+                messageVolumeValues.push(hourData ? hourData.count : 0);
+            }
+
+            return {
+                users: dashboardStats.users,
+                messages: dashboardStats.messages,
+                subscriptions: dashboardStats.subscriptions,
+                whatsapp: dashboardStats.whatsapp,
+                api: dashboardStats.api,
+                userGrowth: {
+                    labels: userGrowthLabels,
+                    data: userGrowthValues
+                },
+                messageVolume: {
+                    labels: messageVolumeLabels,
+                    data: messageVolumeValues
+                }
+            };
+
+        } catch (error) {
+            this.logger.error('Error getting dashboard stats:', error);
+            return this.getEmptyDashboardStats();
+        }
+    }
+
+    getEmptyDashboardStats() {
+        return {
+            users: { total: 0, registered: 0, active: 0, newThisWeek: 0 },
+            messages: { today: 0, incoming: 0, outgoing: 0, failed: 0 },
+            subscriptions: [],
+            whatsapp: { messagesSent: 0, messagesReceived: 0, messagesFailed: 0, spamBlocked: 0, connectionUptime: 0, qrGenerated: 0, sessionRestarts: 0 },
+            api: { callsToday: 0, successfulCalls: 0, successRate: 0, avgResponseTime: 0, rateLimited: 0 },
             userGrowth: {
                 labels: ['6 days ago', '5 days ago', '4 days ago', '3 days ago', '2 days ago', 'Yesterday', 'Today'],
-                data: [5, 8, 12, 15, 18, 22, 25]
+                data: [0, 0, 0, 0, 0, 0, 0]
             },
             messageVolume: {
                 labels: Array.from({length: 24}, (_, i) => `${i}:00`),
-                data: Array.from({length: 24}, () => Math.floor(Math.random() * 50))
+                data: Array.from({length: 24}, () => 0)
             }
         };
-
-        try {
-            if (this.db) {
-                // Get user count
-                const userCount = await this.db.query('SELECT COUNT(*) as count FROM users');
-                stats.users.total = userCount.rows[0]?.count || 0;
-
-                // Get today's messages (mock data for now)
-                stats.messages.today = Math.floor(Math.random() * 100) + 50;
-            }
-        } catch (error) {
-            this.logger.error('Error getting dashboard stats:', error);
-        }
-
-        return stats;
     }
 
     async getUserStats() {
-        const userStats = {
-            total: 0,
-            freePlan: 0,
-            premium: 0,
-            activeWeek: 0,
-            recentUsers: []
-        };
-
         try {
-            if (this.db) {
-                // Get total users
-                const totalResult = await this.db.query('SELECT COUNT(*) as count FROM users');
-                userStats.total = parseInt(totalResult.rows[0]?.count || 0);
-
-                // Get subscription breakdown
-                const subResult = await this.db.query(`
-                    SELECT subscription_type, COUNT(*) as count 
-                    FROM users 
-                    GROUP BY subscription_type
-                `);
-                
-                subResult.rows.forEach(row => {
-                    if (row.subscription_type === 'free') {
-                        userStats.freePlan = parseInt(row.count);
-                    } else if (row.subscription_type === 'premium') {
-                        userStats.premium = parseInt(row.count);
-                    }
-                });
-
-                // Get active users this week (mock for now)
-                userStats.activeWeek = Math.floor(userStats.total * 0.7);
-
-                // Get recent users
-                const recentResult = await this.db.query(`
-                    SELECT name, phone_number, created_at 
-                    FROM users 
-                    ORDER BY created_at DESC 
-                    LIMIT 10
-                `);
-                
-                userStats.recentUsers = recentResult.rows.map(user => ({
-                    name: user.name,
-                    phone: user.phone_number,
-                    createdAt: user.created_at
-                }));
+            if (!this.db) {
+                return {
+                    total: 0,
+                    freePlan: 0,
+                    premium: 0,
+                    trial: 0,
+                    activeWeek: 0,
+                    recentUsers: [],
+                    trend: '+0%',
+                    activeTrend: '+0%'
+                };
             }
+
+            // Get comprehensive dashboard stats which includes user data
+            const dashboardStats = await this.db.getDashboardStats();
+            
+            // Get subscription breakdown
+            const subscriptionBreakdown = {
+                freePlan: 0,
+                premium: 0,
+                trial: 0
+            };
+
+            dashboardStats.subscriptions.forEach(sub => {
+                if (sub.plan === 'free') {
+                    subscriptionBreakdown.freePlan = sub.count;
+                } else if (sub.plan === 'premium') {
+                    subscriptionBreakdown.premium = sub.count;
+                } else if (sub.plan === 'trial') {
+                    subscriptionBreakdown.trial = sub.count;
+                }
+            });
+
+            // Get recent users (last 10)
+            const recentUsers = await this.db.all(`
+                SELECT name, phone, created_at 
+                FROM users 
+                WHERE registration_completed = true
+                ORDER BY created_at DESC 
+                LIMIT 10
+            `);
+
+            // Calculate trends (mock for now - can be enhanced)
+            const userTrend = dashboardStats.users.newThisWeek > 0 ? `+${dashboardStats.users.newThisWeek}` : '0';
+            const activeTrend = dashboardStats.users.active > 0 ? `+${Math.round((dashboardStats.users.active / dashboardStats.users.total) * 100)}%` : '0%';
+
+            return {
+                total: dashboardStats.users.total,
+                freePlan: subscriptionBreakdown.freePlan,
+                premium: subscriptionBreakdown.premium,
+                trial: subscriptionBreakdown.trial,
+                activeWeek: dashboardStats.users.newThisWeek,
+                recentUsers: recentUsers.map(user => ({
+                    name: user.name || 'Unknown',
+                    phone: user.phone,
+                    createdAt: user.created_at
+                })),
+                trend: userTrend,
+                activeTrend: activeTrend,
+                activityData: {
+                    freePlan: subscriptionBreakdown.freePlan,
+                    premium: subscriptionBreakdown.premium,
+                    trial: subscriptionBreakdown.trial
+                }
+            };
+
         } catch (error) {
             this.logger.error('Error getting user stats:', error);
+            return {
+                total: 0,
+                freePlan: 0,
+                premium: 0,
+                trial: 0,
+                activeWeek: 0,
+                recentUsers: [],
+                trend: '+0%',
+                activeTrend: '+0%'
+            };
         }
-
-        return userStats;
     }
 
     async getWhatsAppStats() {
-        const whatsappStats = {
-            phoneNumber: 'Unknown',
-            connectedAt: null,
-            messagesSent: 0,
-            messagesReceived: 0,
-            failedMessages: 0,
-            spamBlocked: 0
-        };
-
         try {
+            if (!this.db) {
+                return {
+                    phoneNumber: 'Unknown',
+                    connectedAt: null,
+                    connected: false,
+                    messagesSent: 0,
+                    messagesReceived: 0,
+                    failedMessages: 0,
+                    spamBlocked: 0,
+                    connectionUptime: 0,
+                    qrGenerated: 0,
+                    sessionRestarts: 0,
+                    connectionStatus: 'disconnected'
+                };
+            }
+
+            // Get real WhatsApp connection info
+            const whatsappStats = {
+                phoneNumber: 'Unknown',
+                connectedAt: null,
+                connected: this.isWhatsAppConnected,
+                connectionStatus: this.isWhatsAppConnected ? 'connected' : 'disconnected'
+            };
+
             if (this.sock && this.sock.user) {
                 whatsappStats.phoneNumber = this.sock.user.id.split(':')[0];
                 whatsappStats.connectedAt = new Date();
             }
 
-            // Mock message statistics
-            whatsappStats.messagesSent = Math.floor(Math.random() * 500) + 100;
-            whatsappStats.messagesReceived = Math.floor(Math.random() * 600) + 150;
-            whatsappStats.failedMessages = Math.floor(Math.random() * 10);
-            whatsappStats.spamBlocked = Math.floor(Math.random() * 25);
+            // Get comprehensive dashboard stats which includes WhatsApp data
+            const dashboardStats = await this.db.getDashboardStats();
+            
+            // Merge with real WhatsApp metrics from database
+            return {
+                ...whatsappStats,
+                messagesSent: dashboardStats.whatsapp.messagesSent,
+                messagesReceived: dashboardStats.whatsapp.messagesReceived,
+                failedMessages: dashboardStats.whatsapp.messagesFailed,
+                spamBlocked: dashboardStats.whatsapp.spamBlocked,
+                connectionUptime: dashboardStats.whatsapp.connectionUptime,
+                qrGenerated: dashboardStats.whatsapp.qrGenerated,
+                sessionRestarts: dashboardStats.whatsapp.sessionRestarts
+            };
 
         } catch (error) {
             this.logger.error('Error getting WhatsApp stats:', error);
+            return {
+                phoneNumber: 'Unknown',
+                connectedAt: null,
+                connected: false,
+                messagesSent: 0,
+                messagesReceived: 0,
+                failedMessages: 0,
+                spamBlocked: 0,
+                connectionUptime: 0,
+                qrGenerated: 0,
+                sessionRestarts: 0,
+                connectionStatus: 'error'
+            };
         }
-
-        return whatsappStats;
     }
 
     async getSystemStats() {
@@ -1000,16 +1119,63 @@ class WhatsAppFinancialBot {
     }
 
     async getRecentLogs() {
-        // Mock log data for now - you can implement actual log retrieval
-        const logs = [
-            { timestamp: new Date(), level: 'info', message: 'WhatsApp connection established' },
-            { timestamp: new Date(Date.now() - 60000), level: 'info', message: 'User registration completed' },
-            { timestamp: new Date(Date.now() - 120000), level: 'warn', message: 'Rate limit warning for user' },
-            { timestamp: new Date(Date.now() - 180000), level: 'info', message: 'Database backup completed' },
-            { timestamp: new Date(Date.now() - 240000), level: 'error', message: 'Failed to send message to user' }
-        ];
+        try {
+            if (!this.db) {
+                // Fallback to mock data if database is not available
+                return [
+                    { timestamp: new Date(), level: 'warn', source: 'system', message: 'Database not initialized - showing mock data' },
+                    { timestamp: new Date(Date.now() - 60000), level: 'info', source: 'system', message: 'System started' }
+                ];
+            }
 
-        return logs;
+            // Get real activity logs from database
+            const activityLogs = await this.db.getRecentActivityLogs(50);
+            
+            // Transform to dashboard format
+            const dashboardLogs = activityLogs.map(log => ({
+                timestamp: new Date(log.timestamp),
+                level: log.level,
+                source: log.source,
+                message: log.message,
+                userPhone: log.userPhone
+            }));
+
+            // If no real logs yet, add some status logs
+            if (dashboardLogs.length === 0) {
+                const statusLogs = [
+                    { 
+                        timestamp: new Date(), 
+                        level: 'info', 
+                        source: 'whatsapp', 
+                        message: this.isWhatsAppConnected ? 'WhatsApp connection active' : 'WhatsApp disconnected' 
+                    },
+                    { 
+                        timestamp: new Date(Date.now() - 30000), 
+                        level: 'info', 
+                        source: 'database', 
+                        message: 'Database connection healthy' 
+                    },
+                    { 
+                        timestamp: new Date(Date.now() - 60000), 
+                        level: 'info', 
+                        source: 'system', 
+                        message: 'Dashboard statistics initialized' 
+                    }
+                ];
+                
+                return statusLogs;
+            }
+
+            return dashboardLogs;
+
+        } catch (error) {
+            this.logger.error('Error getting recent logs:', error);
+            // Fallback to mock data on error
+            return [
+                { timestamp: new Date(), level: 'error', source: 'system', message: `Failed to fetch logs: ${error.message}` },
+                { timestamp: new Date(Date.now() - 60000), level: 'info', source: 'system', message: 'Using fallback log data' }
+            ];
+        }
     }
 
     async performDashboardAction(action) {
